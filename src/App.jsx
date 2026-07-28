@@ -28,6 +28,8 @@ export default function App() {
   });
 
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [sensorPermissionNeeded, setSensorPermissionNeeded] = useState(false);
+  const [sensorActive, setSensorActive] = useState(false);
 
   // Derive user storage key helper
   const getUserKey = (prefix, currentUser = user) => {
@@ -77,6 +79,33 @@ export default function App() {
 
   // Calculate High-Precision Calories & Distance
   const caloriesData = calculateCalories(totalDailySteps, profile);
+
+  // Check if iOS or mobile device requires explicit sensor permission
+  useEffect(() => {
+    if (typeof window !== 'undefined' && typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+      setSensorPermissionNeeded(true);
+    }
+  }, []);
+
+  // Handler to request sensor permission on Mobile Browser
+  const requestSensorPermission = async () => {
+    if (typeof window !== 'undefined' && typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+      try {
+        const permissionState = await DeviceMotionEvent.requestPermission();
+        if (permissionState === 'granted') {
+          setSensorPermissionNeeded(false);
+          setSensorActive(true);
+        } else {
+          alert('Motion sensor permission is required to track walking steps.');
+        }
+      } catch (e) {
+        console.warn('Sensor permission error:', e);
+      }
+    } else {
+      setSensorPermissionNeeded(false);
+      setSensorActive(true);
+    }
+  };
 
   // Handle successful Auth Login / Registration
   const handleAuthSuccess = async (authenticatedUser) => {
@@ -173,7 +202,7 @@ export default function App() {
     }
   }, [isGoalReached]);
 
-  // Google Fit Standard Pedometer Engine (Gravity Filter + Moving Average + 4-Step Verification)
+  // Calibrated Mobile Pedometer Engine (High Sensitivity Gravity Filter + 2-Step Walking Verification)
   useEffect(() => {
     let gravityX = 0;
     let gravityY = 0;
@@ -183,17 +212,18 @@ export default function App() {
     let candidateStepCount = 0;
     let lastCandidateTime = 0;
     
-    const windowSize = 5;
+    const windowSize = 4;
     const magBuffer = [];
 
     const alpha = 0.8;
 
     const handleDeviceMotion = (event) => {
+      setSensorActive(true);
       let userX = 0;
       let userY = 0;
       let userZ = 0;
 
-      if (event.acceleration && typeof event.acceleration.x === 'number' && event.acceleration.x !== null) {
+      if (event.acceleration && typeof event.acceleration.x === 'number' && event.acceleration.x !== null && (event.acceleration.x !== 0 || event.acceleration.y !== 0 || event.acceleration.z !== 0)) {
         userX = event.acceleration.x || 0;
         userY = event.acceleration.y || 0;
         userZ = event.acceleration.z || 0;
@@ -219,8 +249,9 @@ export default function App() {
 
       const now = Date.now();
 
-      if (smoothedMag > 1.6 && (now - lastStepTime) >= 280 && (now - lastStepTime) <= 1800) {
-        if (now - lastCandidateTime > 2200) {
+      // Sensitivity threshold calibrated for mobile walking in hand, pocket, or bag (1.12 m/s²)
+      if (smoothedMag > 1.12 && (now - lastStepTime) >= 230 && (now - lastStepTime) <= 1800) {
+        if (now - lastCandidateTime > 2000) {
           candidateStepCount = 0;
         }
 
@@ -228,8 +259,8 @@ export default function App() {
         lastCandidateTime = now;
         lastStepTime = now;
 
-        if (candidateStepCount >= 4) {
-          const stepsToAdd = candidateStepCount === 4 ? 4 : 1;
+        if (candidateStepCount >= 2) {
+          const stepsToAdd = candidateStepCount === 2 ? 2 : 1;
           setHourlyData(prev => {
             const next = [...prev];
             const hour = new Date().getHours();
@@ -282,7 +313,28 @@ export default function App() {
   };
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }} onClick={sensorPermissionNeeded ? requestSensorPermission : undefined}>
+      {/* Sensor Permission Prompt Banner if needed */}
+      {sensorPermissionNeeded && (
+        <div style={{
+          background: 'linear-gradient(90deg, #3B82F6 0%, #8B5CF6 100%)',
+          color: '#FFFFFF',
+          padding: '12px 16px',
+          textAlign: 'center',
+          fontWeight: 600,
+          fontSize: '14px',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '8px',
+          boxShadow: '0 4px 12px rgba(59, 130, 246, 0.3)'
+        }} onClick={requestSensorPermission}>
+          <span>🚶 Click here to Enable Mobile Walking Step Sensors</span>
+          <span style={{ background: '#FFFFFF', color: '#3B82F6', borderRadius: '12px', padding: '2px 8px', fontSize: '12px' }}>Enable</span>
+        </div>
+      )}
+
       {/* Top Sticky Navbar */}
       <Navbar
         user={user}
@@ -340,7 +392,7 @@ export default function App() {
         color: 'var(--text-dim)',
         background: 'rgba(7, 9, 14, 0.9)'
       }}>
-        PacePulse AI — Live Firebase Cloud Step, Calorie & Distance History Engine
+        PacePulse AI — Live Motion Pedometer & Firebase Cloud Sync Engine
       </footer>
 
       {/* Modals */}
