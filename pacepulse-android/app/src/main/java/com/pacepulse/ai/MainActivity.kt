@@ -1,9 +1,13 @@
 package com.pacepulse.ai
 
+import android.content.Context
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -17,22 +21,76 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 /**
- * PacePulse AI - Native Android Application (Jetpack Compose)
+ * PacePulse AI - Native Android Application with Hardware Accelerometer Pedometer
  */
-class MainActivity : ComponentActivity() {
+class MainActivity : ComponentActivity(), SensorEventListener {
+
+    private lateinit var sensorManager: SensorManager
+    private var accelerometer: Sensor? = null
+
+    private var stepsState = mutableStateOf(0)
+    private var lastStepTime = 0L
+    private var gravityX = 0f
+    private var gravityY = 0f
+    private var gravityZ = 0f
+    private val alpha = 0.8f
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Initialize Hardware Accelerometer Sensor
+        sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+
         setContent {
-            PacePulseApp()
+            PacePulseApp(stepsState.value, onAddSteps = { count -> stepsState.value += count })
         }
     }
+
+    override fun onResume() {
+        super.onResume()
+        accelerometer?.let {
+            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        sensorManager.unregisterListener(this)
+    }
+
+    override fun onSensorChanged(event: SensorEvent?) {
+        if (event == null || event.sensor.type != Sensor.TYPE_ACCELEROMETER) return
+
+        val rawX = event.values[0]
+        val rawY = event.values[1]
+        val rawZ = event.values[2]
+
+        gravityX = alpha * gravityX + (1 - alpha) * rawX
+        gravityY = alpha * gravityY + (1 - alpha) * rawY
+        gravityZ = alpha * gravityZ + (1 - alpha) * rawZ
+
+        val userX = rawX - gravityX
+        val userY = rawY - gravityY
+        val userZ = rawZ - gravityZ
+
+        val userMagnitude = sqrt(userX * userX + userY * userY + userZ * userZ)
+        val now = System.currentTimeMillis()
+
+        if (userMagnitude > 1.12f && (now - lastStepTime) >= 230L) {
+            lastStepTime = now
+            stepsState.value += 1
+        }
+    }
+
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
 }
 
 @Composable
-fun PacePulseApp() {
-    var steps by remember { mutableStateOf(6850) }
+fun PacePulseApp(steps: Int, onAddSteps: (Int) -> Unit) {
     var dailyGoal by remember { mutableStateOf(10000) }
     var age by remember { mutableStateOf(26) }
     var heightCm by remember { mutableStateOf(175f) }
@@ -70,7 +128,7 @@ fun PacePulseApp() {
                     color = Color(0xFF00F2FE)
                 )
                 Text(
-                    text = "🔥 7-Day Streak",
+                    text = "🔥 Live Hardware Motion",
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = Color(0xFFF59E0B)
@@ -142,13 +200,13 @@ fun PacePulseApp() {
                 )
             }
 
-            // Action Buttons
+            // Test Walk Simulation Button
             Button(
-                onClick = { steps += 500 },
+                onClick = { onAddSteps(100) },
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00F2FE))
             ) {
-                Text(text = "+ 500 Steps Walked", color = Color(0xFF040914), fontWeight = FontWeight.Bold)
+                Text(text = "+ 100 Walked Steps (Test Motion)", color = Color(0xFF040914), fontWeight = FontWeight.Bold)
             }
         }
     }
