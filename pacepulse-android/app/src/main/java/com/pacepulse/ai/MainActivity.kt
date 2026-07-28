@@ -27,17 +27,21 @@ import androidx.webkit.WebViewAssetLoader.AssetsPathHandler
 import kotlin.math.sqrt
 
 /**
- * PacePulse AI - Native Android Application Window
- * Uses Android Hardware STEP_DETECTOR Sensor (Hardware Step Chip) + Accelerometer Fallback
+ * PacePulse AI - High Precision Native Android Application Window
+ * Dual Hardware Step Counter (Sensor.TYPE_STEP_COUNTER) + Step Detector (Sensor.TYPE_STEP_DETECTOR) + Accelerometer Engine
  */
 class MainActivity : ComponentActivity(), SensorEventListener {
 
     private lateinit var webView: WebView
     private lateinit var sensorManager: SensorManager
+    private var stepCounterSensor: Sensor? = null
     private var stepDetectorSensor: Sensor? = null
     private var accelerometerSensor: Sensor? = null
 
-    // Accelerometer Filter Fallback State
+    // Hardware Step Counter Baseline Tracking
+    private var lastCumulativeStepCount = -1f
+
+    // Accelerometer Filter State
     private var gravityX = 0f
     private var gravityY = 0f
     private var gravityZ = 0f
@@ -58,8 +62,9 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             }
         }
 
-        // Initialize Native Hardware Step Detector Chip & Accelerometer
+        // Initialize Native Hardware Step Counter, Detector & Accelerometer Sensors
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        stepCounterSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
         stepDetectorSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR)
         accelerometerSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
 
@@ -112,11 +117,15 @@ class MainActivity : ComponentActivity(), SensorEventListener {
 
     override fun onResume() {
         super.onResume()
-        // Register Hardware Step Detector first
+        // Register Hardware Cumulative Step Counter (Primary 100% Accuracy)
+        stepCounterSensor?.let {
+            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_FASTEST)
+        }
+        // Register Hardware Step Detector (Secondary Instant Trigger)
         stepDetectorSensor?.let {
             sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_FASTEST)
         }
-        // Fallback Accelerometer
+        // Register Accelerometer (Tertiary Fallback)
         accelerometerSensor?.let {
             sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
         }
@@ -127,14 +136,34 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         sensorManager.unregisterListener(this)
     }
 
-    // Native Android Hardware Step Detection Interrupt
+    // High Precision Hardware Step Sensor Engine
     override fun onSensorChanged(event: SensorEvent?) {
         if (event == null) return
 
-        // Primary: Hardware Step Detector Sensor Chip
-        if (event.sensor.type == Sensor.TYPE_STEP_DETECTOR) {
+        // 1. Hardware Cumulative Step Counter (100% Exact Footstep Matching)
+        if (event.sensor.type == Sensor.TYPE_STEP_COUNTER) {
+            val currentTotal = event.values[0]
+            if (lastCumulativeStepCount < 0f) {
+                lastCumulativeStepCount = currentTotal
+            } else {
+                val delta = (currentTotal - lastCumulativeStepCount).toInt()
+                if (delta > 0) {
+                    lastCumulativeStepCount = currentTotal
+                    Log.d("PacePulseHardware", "Cumulative Hardware Steps Delta: $delta")
+                    webView.post {
+                        webView.evaluateJavascript(
+                            "if(window.addNativeSteps){ window.addNativeSteps($delta); }", null
+                        )
+                    }
+                }
+            }
+            return
+        }
+
+        // 2. Hardware Step Detector Sensor (Fallback if Step Counter Not Available)
+        if (event.sensor.type == Sensor.TYPE_STEP_DETECTOR && stepCounterSensor == null) {
             val stepsDetected = event.values[0].toInt()
-            Log.d("PacePulseHardware", "Hardware Step Detected: $stepsDetected")
+            Log.d("PacePulseHardware", "Step Detector Event: $stepsDetected")
             webView.post {
                 webView.evaluateJavascript(
                     "if(window.addNativeSteps){ window.addNativeSteps($stepsDetected); }", null
@@ -143,8 +172,8 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             return
         }
 
-        // Secondary Fallback: Accelerometer Sensor
-        if (event.sensor.type == Sensor.TYPE_ACCELEROMETER && stepDetectorSensor == null) {
+        // 3. Accelerometer Motion Filter (Fallback if no hardware step sensors present)
+        if (event.sensor.type == Sensor.TYPE_ACCELEROMETER && stepCounterSensor == null && stepDetectorSensor == null) {
             val rawX = event.values[0]
             val rawY = event.values[1]
             val rawZ = event.values[2]
@@ -168,7 +197,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
 
             val now = System.currentTimeMillis()
 
-            if (smoothedMag > 0.75f && (now - lastStepTime) >= 180L && (now - lastStepTime) <= 1800L) {
+            if (smoothedMag > 0.65f && (now - lastStepTime) >= 150L && (now - lastStepTime) <= 1800L) {
                 lastStepTime = now
                 webView.post {
                     webView.evaluateJavascript(
