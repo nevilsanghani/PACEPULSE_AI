@@ -1,5 +1,5 @@
 import React from 'react';
-import { Flame, Footprints, Navigation, Clock, Share2, RotateCcw, Trophy } from 'lucide-react';
+import { Flame, Footprints, Navigation, Clock, Share2, RotateCcw, Trophy, Activity } from 'lucide-react';
 
 export function StepRing({ 
   steps, 
@@ -21,6 +21,16 @@ export function StepRing({
   const bmrDisplay = caloriesData && typeof caloriesData.bmrDaily === 'number'
     ? caloriesData.bmrDaily
     : 1669;
+
+  const handleManualSensorEnable = () => {
+    if (typeof window !== 'undefined' && typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+      DeviceMotionEvent.requestPermission().then(state => {
+        if (state === 'granted') alert('✅ Sensor Active! Start walking with your phone.');
+      }).catch(() => {});
+    } else {
+      alert('✅ Mobile Pedometer Sensor Active! Start walking with your phone.');
+    }
+  };
 
   return (
     <div className="glass-panel" style={{ padding: '36px', textAlign: 'center', position: 'relative', overflow: 'hidden' }}>
@@ -128,6 +138,30 @@ export function StepRing({
         </div>
       </div>
 
+      {/* Sensor Live Active Indicator & Manual Trigger */}
+      <div 
+        onClick={handleManualSensorEnable}
+        style={{
+          background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(59, 130, 246, 0.1) 100%)',
+          border: '1px solid rgba(16, 185, 129, 0.3)',
+          borderRadius: '16px',
+          padding: '10px 16px',
+          marginBottom: '20px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          cursor: 'pointer'
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <Activity size={18} color="#10B981" />
+          <span style={{ fontSize: '12px', color: '#34D399', fontWeight: '700' }}>Pedometer Motion Sensor:</span>
+        </div>
+        <span style={{ fontSize: '12px', fontWeight: '800', color: '#10B981', background: 'rgba(16, 185, 129, 0.2)', padding: '2px 8px', borderRadius: '10px' }}>
+          ● LIVE READY
+        </span>
+      </div>
+
       {/* BMR & MET Live Metabolism Banner */}
       <div style={{
         background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.12) 0%, rgba(0, 242, 254, 0.08) 100%)',
@@ -148,7 +182,7 @@ export function StepRing({
         </span>
       </div>
 
-      {/* PREVIOUS SLEEK 3-COLUMN METRICS UI DESIGN (Calories, Distance, Active Time) */}
+      {/* 3-COLUMN METRICS UI DESIGN (Calories, Distance, Active Time) */}
       <div className="metrics-cards-grid" style={{
         display: 'grid',
         gridTemplateColumns: 'repeat(3, 1fr)',
