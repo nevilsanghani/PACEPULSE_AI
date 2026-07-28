@@ -8,7 +8,7 @@ import { ProfileModal } from './components/ProfileModal';
 import { ShareModal } from './components/ShareModal';
 import { AuthModal } from './components/AuthModal';
 import { ResetConfirmationModal } from './components/ResetConfirmationModal';
-import { ManualEntryModal } from './components/ManualEntryModal';
+import { HistoryModal } from './components/HistoryModal';
 import { 
   auth, 
   signOut,
@@ -71,7 +71,7 @@ export default function App() {
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
   const [showResetModal, setShowResetModal] = useState(false);
-  const [showManualEntryModal, setShowManualEntryModal] = useState(false);
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
 
   // Current Hour Slot
   const currentHour = new Date().getHours();
@@ -149,37 +149,6 @@ export default function App() {
   const handleGuestLogin = (guestUser) => {
     handleAuthSuccess(guestUser);
     setShowProfileModal(true);
-  };
-
-  // Save Manual Historical Date-wise Step & Active Calorie Entry
-  const handleSaveManualEntry = async (entryData) => {
-    const { dateStr, steps, activeKcal, distanceKm } = entryData;
-
-    // If entry date is today, update current live state
-    if (dateStr === todayStr) {
-      setHourlyData(prev => {
-        const next = [...prev];
-        const hour = new Date().getHours();
-        next[hour] = { ...next[hour], steps: Math.max(next[hour].steps, steps) };
-        return next;
-      });
-    }
-
-    // Save to Firestore subcollection date-wise
-    if (user && user.uid && user.uid !== 'guest') {
-      const customCalorieObj = {
-        totalKcal: activeKcal,
-        activeKcal: activeKcal,
-        restingKcal: 0,
-        bmrDaily: Math.round(calculateCalories(steps, profile).bmrDaily),
-        distanceKm: distanceKm || parseFloat((steps * 0.00075).toFixed(2)),
-        durationMins: Math.round(steps / 100)
-      };
-      await saveDailyLogsToDb(user.uid, dateStr, steps, profile.dailyGoal, customCalorieObj, hourlyData);
-      alert(`✅ Successfully logged ${steps.toLocaleString()} steps and ${activeKcal} active kcal for ${dateStr}!`);
-    } else {
-      alert(`✅ Logged ${steps.toLocaleString()} steps locally for ${dateStr}! (Sign in to sync to Firebase)`);
-    }
   };
 
   // Sync profile changes to user-keyed localStorage
@@ -329,7 +298,7 @@ export default function App() {
         onOpenProfile={() => setShowProfileModal(true)}
       />
 
-      {/* Action Bar for Manual Date Entry */}
+      {/* Action Bar for Past Activity History */}
       <div style={{
         maxWidth: '1200px',
         width: '100%',
@@ -339,7 +308,7 @@ export default function App() {
         justifyContent: 'flex-end'
       }}>
         <button
-          onClick={() => setShowManualEntryModal(true)}
+          onClick={() => setShowHistoryModal(true)}
           style={{
             padding: '10px 18px',
             borderRadius: '12px',
@@ -355,7 +324,7 @@ export default function App() {
             transition: 'all 0.2s ease'
           }}
         >
-          <span>📅</span> Log Past Activity / Date Entry
+          <span>📜</span> View Activity History Log
         </button>
       </div>
 
@@ -445,10 +414,11 @@ export default function App() {
         />
       )}
 
-      {showManualEntryModal && (
-        <ManualEntryModal
-          onSaveEntry={handleSaveManualEntry}
-          onClose={() => setShowManualEntryModal(false)}
+      {showHistoryModal && (
+        <HistoryModal
+          user={user}
+          profile={profile}
+          onClose={() => setShowHistoryModal(false)}
         />
       )}
     </div>

@@ -29,7 +29,7 @@ import kotlin.math.sqrt
 
 /**
  * PacePulse AI - High Precision Native Android Application Window
- * Starts Background StepTrackingService for screen-off power button standby step counting
+ * Starts Smart Battery-Optimized StepTrackingService on Motion (Auto-Stops after 2 Minutes Idle)
  */
 class MainActivity : ComponentActivity(), SensorEventListener {
 
@@ -65,17 +65,8 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             }
         }
 
-        // Start Background Step Tracking Foreground Service for Screen-Off Standby
-        try {
-            val serviceIntent = Intent(this, StepTrackingService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(serviceIntent)
-            } else {
-                startService(serviceIntent)
-            }
-        } catch (e: Exception) {
-            Log.e("PacePulseService", "Could not start Foreground Step Service: ${e.message}")
-        }
+        // Start Smart Background Step Tracking Service
+        startSmartStepService()
 
         // Initialize Native Hardware Step Sensors
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
@@ -127,9 +118,23 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         setContentView(webView)
     }
 
+    private fun startSmartStepService() {
+        try {
+            val serviceIntent = Intent(this, StepTrackingService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(serviceIntent)
+            } else {
+                startService(serviceIntent)
+            }
+        } catch (e: Exception) {
+            Log.e("PacePulseService", "Error starting step service: ${e.message}")
+        }
+    }
+
     override fun onResume() {
         super.onResume()
-        // Register Hardware Cumulative Step Counter
+        startSmartStepService()
+
         stepCounterSensor?.let {
             sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_FASTEST)
         }
@@ -140,7 +145,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
         }
 
-        // Flush any steps counted in background while screen was turned off!
+        // Flush any background steps counted on motion while screen was turned off
         val backgroundSteps = StepTrackingService.backgroundStepsDelta
         if (backgroundSteps > 0) {
             StepTrackingService.backgroundStepsDelta = 0
@@ -159,6 +164,11 @@ class MainActivity : ComponentActivity(), SensorEventListener {
 
     override fun onSensorChanged(event: SensorEvent?) {
         if (event == null) return
+
+        // Motion detected -> ensure background service is active
+        if (!StepTrackingService.isServiceRunning) {
+            startSmartStepService()
+        }
 
         if (event.sensor.type == Sensor.TYPE_STEP_COUNTER) {
             val currentTotal = event.values[0]
