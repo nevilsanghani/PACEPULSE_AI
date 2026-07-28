@@ -10,8 +10,6 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
-import android.hardware.TriggerEvent
-import android.hardware.TriggerEventListener
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
@@ -21,14 +19,13 @@ import androidx.core.app.NotificationCompat
 
 /**
  * PacePulse AI - Battery Smart Background Step Tracking Service
- * Auto-starts on motion and auto-stops after 2 minutes of phone idling to prevent battery drain.
+ * Delegates step counting to NativeStepManager singleton
  */
 class StepTrackingService : Service(), SensorEventListener {
 
     private lateinit var sensorManager: SensorManager
     private var stepCounterSensor: Sensor? = null
     private var stepDetectorSensor: Sensor? = null
-    private var sigMotionSensor: Sensor? = null
 
     private val idleHandler = Handler(Looper.getMainLooper())
     private val IDLE_TIMEOUT_MS = 2 * 60 * 1000L // 2 Minutes Idle Timeout
@@ -41,7 +38,6 @@ class StepTrackingService : Service(), SensorEventListener {
     companion object {
         const val CHANNEL_ID = "PacePulseStepChannel"
         const val NOTIFICATION_ID = 1001
-        var backgroundStepsDelta = 0
         var isServiceRunning = false
     }
 
@@ -63,7 +59,6 @@ class StepTrackingService : Service(), SensorEventListener {
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         stepCounterSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
         stepDetectorSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR)
-        sigMotionSensor = sensorManager.getDefaultSensor(Sensor.TYPE_SIGNIFICANT_MOTION)
 
         stepCounterSensor?.let {
             sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_FASTEST)
@@ -72,7 +67,6 @@ class StepTrackingService : Service(), SensorEventListener {
             sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_FASTEST)
         }
 
-        // Reset 2-minute idle timer on start
         resetIdleTimer()
         Log.d("PacePulseService", "Battery-Smart Motion Step Tracking Service Started.")
     }
@@ -82,29 +76,15 @@ class StepTrackingService : Service(), SensorEventListener {
         idleHandler.postDelayed(idleRunnable, IDLE_TIMEOUT_MS)
     }
 
-    private var lastCumulativeStepCount = -1f
-
     override fun onSensorChanged(event: SensorEvent?) {
         if (event == null) return
 
-        // Step detected -> Phone is active, reset 2-minute idle countdown
         resetIdleTimer()
 
         if (event.sensor.type == Sensor.TYPE_STEP_COUNTER) {
-            val currentTotal = event.values[0]
-            if (lastCumulativeStepCount < 0f) {
-                lastCumulativeStepCount = currentTotal
-            } else {
-                val delta = (currentTotal - lastCumulativeStepCount).toInt()
-                if (delta > 0) {
-                    lastCumulativeStepCount = currentTotal
-                    backgroundStepsDelta += delta
-                    Log.d("PacePulseService", "Background step delta: $delta (Total: $backgroundStepsDelta)")
-                }
-            }
-        } else if (event.sensor.type == Sensor.TYPE_STEP_DETECTOR && stepCounterSensor == null) {
-            val stepsDetected = event.values[0].toInt()
-            backgroundStepsDelta += stepsDetected
+            NativeStepManager.processCumulativeStep(event.values[0], null)
+        } else if (event.sensor.type == Sensor.TYPE_STEP_DETECTOR) {
+            NativeStepManager.processSingleStepDetectorEvent(null)
         }
     }
 

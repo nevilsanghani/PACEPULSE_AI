@@ -9,6 +9,9 @@ import { ShareModal } from './components/ShareModal';
 import { AuthModal } from './components/AuthModal';
 import { ResetConfirmationModal } from './components/ResetConfirmationModal';
 import { HistoryModal } from './components/HistoryModal';
+import { CalorieTrackerWidget } from './components/CalorieTrackerWidget';
+import { SocialLeaderboardModal } from './components/SocialLeaderboardModal';
+import { speakMilestoneAnnouncement, setAudioCoachMuted } from './utils/audioCoach';
 import { 
   auth, 
   signOut,
@@ -36,7 +39,7 @@ export default function App() {
     return `${prefix}_${key}`;
   };
 
-  // User Profile State (User-Keyed Persistence)
+  // User Profile State
   const [profile, setProfile] = useState(() => {
     const key = user ? getUserKey('pacepulse_profile', user) : 'pacepulse_profile_guest';
     const saved = localStorage.getItem(key);
@@ -52,6 +55,16 @@ export default function App() {
 
   // Daily Steps Sum
   const totalDailySteps = hourlyData.reduce((sum, h) => sum + h.steps, 0);
+
+  // Food Intake Calories State
+  const [foodIntakeKcal, setFoodIntakeKcal] = useState(() => {
+    const key = user ? getUserKey('pacepulse_food', user) : 'pacepulse_food_guest';
+    const saved = localStorage.getItem(key);
+    return saved ? parseInt(saved) : 0;
+  });
+
+  // Audio Coach Mute Toggle State
+  const [isMuted, setIsMuted] = useState(false);
 
   // Streak & History State
   const [streakDays, setStreakDays] = useState(() => {
@@ -72,15 +85,40 @@ export default function App() {
   const [showShareModal, setShowShareModal] = useState(false);
   const [showResetModal, setShowResetModal] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [showSocialModal, setShowSocialModal] = useState(false);
 
-  // Current Hour Slot
+  // Current Hour Slot & Date
   const currentHour = new Date().getHours();
   const todayStr = new Date().toISOString().split('T')[0];
 
   // Calculate High-Precision Active Calories & Distance (EXCLUDES BMR)
   const caloriesData = calculateCalories(totalDailySteps, profile);
 
-  // Expose Native Android Bridge Window Listener
+  // AI Voice Audio Coach Milestone Announcement Trigger
+  const [lastAnnouncedMilestone, setLastAnnouncedMilestone] = useState(0);
+  useEffect(() => {
+    if (totalDailySteps > 0 && totalDailySteps % 1000 < 5 && totalDailySteps !== lastAnnouncedMilestone) {
+      setLastAnnouncedMilestone(totalDailySteps);
+      speakMilestoneAnnouncement(totalDailySteps, caloriesData.activeKcal, profile.dailyGoal);
+    }
+  }, [totalDailySteps, caloriesData.activeKcal, profile.dailyGoal, lastAnnouncedMilestone]);
+
+  // Audio Mute Handler
+  const handleToggleMute = () => {
+    const nextMuted = !isMuted;
+    setIsMuted(nextMuted);
+    setAudioCoachMuted(nextMuted);
+  };
+
+  // Add Meal Handler
+  const handleAddMeal = (meal) => {
+    const nextIntake = foodIntakeKcal + meal.calories;
+    setFoodIntakeKcal(nextIntake);
+    const key = getUserKey('pacepulse_food');
+    localStorage.setItem(key, String(nextIntake));
+  };
+
+  // Native Android Bridge Window Listener
   useEffect(() => {
     window.addNativeSteps = (count = 1) => {
       setHourlyData(prev => {
@@ -98,7 +136,7 @@ export default function App() {
     };
   }, []);
 
-  // Handle successful Auth Login / Registration
+  // Handle Auth Login / Registration
   const handleAuthSuccess = async (authenticatedUser) => {
     setUser(authenticatedUser);
     localStorage.setItem('pacepulse_user', JSON.stringify(authenticatedUser));
@@ -123,7 +161,6 @@ export default function App() {
       }
     }
 
-    // Load daily steps log from Cloud Firestore or Local Cache
     const hourlyKey = getUserKey('pacepulse_hourly', authenticatedUser);
     const cloudLog = await getDailyLogsFromDb(authenticatedUser.uid, todayStr);
     
@@ -135,7 +172,6 @@ export default function App() {
       setHourlyData(savedHourly ? JSON.parse(savedHourly) : generateEmptyHourlyData());
     }
 
-    // Load or initialize streak & history
     const streakKey = getUserKey('pacepulse_streak', authenticatedUser);
     const savedStreak = localStorage.getItem(streakKey);
     setStreakDays(savedStreak ? parseInt(savedStreak) : 0);
@@ -145,19 +181,16 @@ export default function App() {
     setWeeklyHistory(savedHistory ? JSON.parse(savedHistory) : Array.from({ length: 7 }, () => ({ completed: false, steps: 0 })));
   };
 
-  // Handle Guest Login -> Automatically Prompt for Profile Details
   const handleGuestLogin = (guestUser) => {
     handleAuthSuccess(guestUser);
     setShowProfileModal(true);
   };
 
-  // Sync profile changes to user-keyed localStorage
   useEffect(() => {
     const key = getUserKey('pacepulse_profile');
     localStorage.setItem(key, JSON.stringify(profile));
   }, [profile, user]);
 
-  // Sync hourly steps & calories to user-keyed localStorage AND Firebase Cloud Firestore!
   useEffect(() => {
     const key = getUserKey('pacepulse_hourly');
     localStorage.setItem(key, JSON.stringify(hourlyData));
@@ -167,22 +200,18 @@ export default function App() {
     }
   }, [hourlyData, totalDailySteps, profile.dailyGoal, user]);
 
-  // Sync streak to user-keyed localStorage
   useEffect(() => {
     const key = getUserKey('pacepulse_streak');
     localStorage.setItem(key, String(streakDays));
   }, [streakDays, user]);
 
-  // Sync history to user-keyed localStorage
   useEffect(() => {
     const key = getUserKey('pacepulse_history');
     localStorage.setItem(key, JSON.stringify(weeklyHistory));
   }, [weeklyHistory, user]);
 
-  // Goal Reached Flag
   const isGoalReached = totalDailySteps >= profile.dailyGoal && totalDailySteps > 0;
 
-  // Trigger Confetti when goal achieved
   useEffect(() => {
     if (isGoalReached) {
       confetti({
@@ -193,16 +222,16 @@ export default function App() {
     }
   }, [isGoalReached]);
 
-  // Handheld Walking Pedometer Engine
+  // Web Motion Fallback
   useEffect(() => {
+    if (window.addNativeSteps) return;
+
     let gravityX = 0;
     let gravityY = 0;
     let gravityZ = 0;
-
     let lastStepTime = 0;
     const windowSize = 4;
     const magBuffer = [];
-
     const alpha = 0.8;
 
     const handleDeviceMotion = (event) => {
@@ -229,11 +258,9 @@ export default function App() {
       }
 
       const userMagnitude = Math.sqrt(userX * userX + userY * userY + userZ * userZ);
-
       magBuffer.push(userMagnitude);
       if (magBuffer.length > windowSize) magBuffer.shift();
       const smoothedMag = magBuffer.reduce((a, b) => a + b, 0) / magBuffer.length;
-
       const now = Date.now();
 
       if (smoothedMag > 0.65 && (now - lastStepTime) >= 150 && (now - lastStepTime) <= 1800) {
@@ -253,7 +280,6 @@ export default function App() {
     if (typeof window !== 'undefined' && window.DeviceMotionEvent) {
       window.addEventListener('devicemotion', handleDeviceMotion, true);
     }
-
     return () => {
       if (typeof window !== 'undefined' && window.DeviceMotionEvent) {
         window.removeEventListener('devicemotion', handleDeviceMotion, true);
@@ -261,26 +287,27 @@ export default function App() {
     };
   }, []);
 
-  // Confirm Reset Steps & Streak Handler
   const handleConfirmReset = () => {
+    if (window.AndroidStepBridge && window.AndroidStepBridge.resetNativeBaseline) {
+      try {
+        window.AndroidStepBridge.resetNativeBaseline();
+      } catch (e) {}
+    }
     setHourlyData(generateEmptyHourlyData());
+    setFoodIntakeKcal(0);
     setStreakDays(0);
     setWeeklyHistory(Array.from({ length: 7 }, () => ({ completed: false, steps: 0 })));
     setShowResetModal(false);
   };
 
-  // Sign Out Handler
   const handleSignOut = async () => {
     if (auth) {
       try {
         await signOut(auth);
-      } catch (e) {
-        console.warn("Sign out fallback:", e);
-      }
+      } catch (e) {}
     }
     setUser(null);
     localStorage.removeItem('pacepulse_user');
-    
     setHourlyData(generateEmptyHourlyData());
     setProfile(DEFAULT_PROFILE);
     setStreakDays(0);
@@ -298,15 +325,61 @@ export default function App() {
         onOpenProfile={() => setShowProfileModal(true)}
       />
 
-      {/* Action Bar for Past Activity History */}
+      {/* Action Bar for Social Connections, Audio Coach & History */}
       <div style={{
         maxWidth: '1200px',
         width: '100%',
         margin: '16px auto 0',
         padding: '0 16px',
         display: 'flex',
-        justifyContent: 'flex-end'
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        flexWrap: 'wrap',
+        gap: '12px'
       }}>
+        {/* Left Action Buttons */}
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <button
+            onClick={() => setShowSocialModal(true)}
+            style={{
+              padding: '10px 18px',
+              borderRadius: '12px',
+              background: 'linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%)',
+              border: 'none',
+              color: 'white',
+              fontSize: '13px',
+              fontWeight: 700,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              boxShadow: '0 4px 12px rgba(139, 92, 246, 0.3)'
+            }}
+          >
+            <span>🏆</span> Friends Leaderboard & Requests
+          </button>
+
+          <button
+            onClick={handleToggleMute}
+            style={{
+              padding: '10px 14px',
+              borderRadius: '12px',
+              background: isMuted ? 'rgba(239, 68, 68, 0.15)' : 'rgba(16, 185, 129, 0.15)',
+              border: `1px solid ${isMuted ? 'rgba(239, 68, 68, 0.4)' : 'rgba(16, 185, 129, 0.4)'}`,
+              color: isMuted ? '#f87171' : '#34d399',
+              fontSize: '13px',
+              fontWeight: 700,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
+          >
+            <span>{isMuted ? '🔇' : '🎙️'}</span> {isMuted ? 'Voice Muted' : 'Voice Coach ON'}
+          </button>
+        </div>
+
+        {/* Right Action Button */}
         <button
           onClick={() => setShowHistoryModal(true)}
           style={{
@@ -320,8 +393,7 @@ export default function App() {
             cursor: 'pointer',
             display: 'flex',
             alignItems: 'center',
-            gap: '8px',
-            transition: 'all 0.2s ease'
+            gap: '8px'
           }}
         >
           <span>📜</span> View Activity History Log
@@ -360,6 +432,13 @@ export default function App() {
           />
         </div>
 
+        {/* Net Active Calorie Balance Widget */}
+        <CalorieTrackerWidget
+          activeKcal={caloriesData.activeKcal}
+          foodIntakeKcal={foodIntakeKcal}
+          onAddMeal={handleAddMeal}
+        />
+
         {/* Bottom Section: 24-Hour Step Breakdown Chart */}
         <HourlyChart
           hourlyData={hourlyData}
@@ -376,7 +455,7 @@ export default function App() {
         color: 'var(--text-dim)',
         background: 'rgba(7, 9, 14, 0.9)'
       }}>
-        PacePulse AI — High Precision Active Calorie Tracker & 24/7 Background Standby Engine
+        PacePulse AI — AI Voice Coach, Social Leaderboards & High Precision Active Calorie Engine
       </footer>
 
       {/* Modals */}
@@ -419,6 +498,16 @@ export default function App() {
           user={user}
           profile={profile}
           onClose={() => setShowHistoryModal(false)}
+        />
+      )}
+
+      {showSocialModal && (
+        <SocialLeaderboardModal
+          user={user}
+          userSteps={totalDailySteps}
+          activeKcal={caloriesData.activeKcal}
+          distanceKm={caloriesData.distanceKm}
+          onClose={() => setShowSocialModal(false)}
         />
       )}
     </div>

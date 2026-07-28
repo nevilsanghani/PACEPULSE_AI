@@ -13,6 +13,7 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.webkit.ConsoleMessage
+import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -28,8 +29,8 @@ import androidx.webkit.WebViewAssetLoader.AssetsPathHandler
 import kotlin.math.sqrt
 
 /**
- * PacePulse AI - High Precision Native Android Application Window
- * Starts Smart Battery-Optimized StepTrackingService on Motion (Auto-Stops after 2 Minutes Idle)
+ * PacePulse AI - Native Android Application Window
+ * Integrates JavascriptInterface bridge for instant step resetting and NativeStepManager
  */
 class MainActivity : ComponentActivity(), SensorEventListener {
 
@@ -39,8 +40,6 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     private var stepDetectorSensor: Sensor? = null
     private var accelerometerSensor: Sensor? = null
 
-    private var lastCumulativeStepCount = -1f
-
     private var gravityX = 0f
     private var gravityY = 0f
     private var gravityZ = 0f
@@ -49,6 +48,14 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     private var lastStepTime = 0L
     private val windowSize = 4
     private val magBuffer = ArrayList<Float>()
+
+    inner class AndroidStepBridge {
+        @JavascriptInterface
+        fun resetNativeBaseline() {
+            Log.d("PacePulseBridge", "Reset native baseline called from JavaScript")
+            NativeStepManager.resetBaseline()
+        }
+    }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -86,6 +93,9 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             settings.allowContentAccess = true
             settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
             settings.cacheMode = WebSettings.LOAD_DEFAULT
+
+            // Expose native reset baseline function to JavaScript
+            addJavascriptInterface(AndroidStepBridge(), "AndroidStepBridge")
 
             webViewClient = object : WebViewClient() {
                 override fun shouldInterceptRequest(
@@ -145,16 +155,8 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
         }
 
-        // Flush any background steps counted on motion while screen was turned off
-        val backgroundSteps = StepTrackingService.backgroundStepsDelta
-        if (backgroundSteps > 0) {
-            StepTrackingService.backgroundStepsDelta = 0
-            webView.post {
-                webView.evaluateJavascript(
-                    "if(window.addNativeSteps){ window.addNativeSteps($backgroundSteps); }", null
-                )
-            }
-        }
+        // Flush any background steps accumulated while screen was turned off
+        NativeStepManager.flushPendingBackgroundSteps(webView)
     }
 
     override fun onPause() {
@@ -165,39 +167,23 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     override fun onSensorChanged(event: SensorEvent?) {
         if (event == null) return
 
-        // Motion detected -> ensure background service is active
         if (!StepTrackingService.isServiceRunning) {
             startSmartStepService()
         }
 
+        // Primary: Cumulative Hardware Step Counter
         if (event.sensor.type == Sensor.TYPE_STEP_COUNTER) {
-            val currentTotal = event.values[0]
-            if (lastCumulativeStepCount < 0f) {
-                lastCumulativeStepCount = currentTotal
-            } else {
-                val delta = (currentTotal - lastCumulativeStepCount).toInt()
-                if (delta > 0) {
-                    lastCumulativeStepCount = currentTotal
-                    webView.post {
-                        webView.evaluateJavascript(
-                            "if(window.addNativeSteps){ window.addNativeSteps($delta); }", null
-                        )
-                    }
-                }
-            }
+            NativeStepManager.processCumulativeStep(event.values[0], webView)
             return
         }
 
+        // Secondary: Hardware Step Detector Event
         if (event.sensor.type == Sensor.TYPE_STEP_DETECTOR && stepCounterSensor == null) {
-            val stepsDetected = event.values[0].toInt()
-            webView.post {
-                webView.evaluateJavascript(
-                    "if(window.addNativeSteps){ window.addNativeSteps($stepsDetected); }", null
-                )
-            }
+            NativeStepManager.processSingleStepDetectorEvent(webView)
             return
         }
 
+        // Fallback: Accelerometer Filter (Only if no hardware step sensors present)
         if (event.sensor.type == Sensor.TYPE_ACCELEROMETER && stepCounterSensor == null && stepDetectorSensor == null) {
             val rawX = event.values[0]
             val rawY = event.values[1]
@@ -224,11 +210,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
 
             if (smoothedMag > 0.65f && (now - lastStepTime) >= 150L && (now - lastStepTime) <= 1800L) {
                 lastStepTime = now
-                webView.post {
-                    webView.evaluateJavascript(
-                        "if(window.addNativeSteps){ window.addNativeSteps(1); }", null
-                    )
-                }
+                NativeStepManager.processSingleStepDetectorEvent(webView)
             }
         }
     }
