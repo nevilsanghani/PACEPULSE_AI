@@ -80,7 +80,7 @@ export default function App() {
 
   // Expose Native Android Bridge Window Listener
   useEffect(() => {
-    window.addNativeSteps = (count) => {
+    window.addNativeSteps = (count = 1) => {
       setHourlyData(prev => {
         const next = [...prev];
         const hour = new Date().getHours();
@@ -191,17 +191,14 @@ export default function App() {
     }
   }, [isGoalReached]);
 
-  // Google Fit Strict Pedometer Engine (Gravity Filter + 5-Sample Buffer + 4-Step Rhythm Verification)
+  // Handheld Walking Pedometer Engine (0.85 m/s² Peak Filter)
   useEffect(() => {
     let gravityX = 0;
     let gravityY = 0;
     let gravityZ = 0;
 
     let lastStepTime = 0;
-    let candidateStepCount = 0;
-    let lastCandidateTime = 0;
-    
-    const windowSize = 5;
+    const windowSize = 4;
     const magBuffer = [];
 
     const alpha = 0.8;
@@ -237,28 +234,18 @@ export default function App() {
 
       const now = Date.now();
 
-      // Google Fit strict threshold (1.55 m/s²) + 4-step continuous rhythm verification (0 false steps when desk moved)
-      if (smoothedMag > 1.55 && (now - lastStepTime) >= 280 && (now - lastStepTime) <= 1800) {
-        if (now - lastCandidateTime > 2200) {
-          candidateStepCount = 0;
-        }
-
-        candidateStepCount++;
-        lastCandidateTime = now;
+      // Handheld walking sensitivity threshold (0.85 m/s²)
+      if (smoothedMag > 0.85 && (now - lastStepTime) >= 200 && (now - lastStepTime) <= 1800) {
         lastStepTime = now;
-
-        if (candidateStepCount >= 4) {
-          const stepsToAdd = candidateStepCount === 4 ? 4 : 1;
-          setHourlyData(prev => {
-            const next = [...prev];
-            const hour = new Date().getHours();
-            next[hour] = {
-              ...next[hour],
-              steps: next[hour].steps + stepsToAdd
-            };
-            return next;
-          });
-        }
+        setHourlyData(prev => {
+          const next = [...prev];
+          const hour = new Date().getHours();
+          next[hour] = {
+            ...next[hour],
+            steps: next[hour].steps + 1
+          };
+          return next;
+        });
       }
     };
 
@@ -359,7 +346,7 @@ export default function App() {
         color: 'var(--text-dim)',
         background: 'rgba(7, 9, 14, 0.9)'
       }}>
-        PacePulse AI — Google Fit Standard Pedometer & Firebase Cloud Sync Engine
+        PacePulse AI — Handheld Pedometer & Firebase Cloud Sync Engine
       </footer>
 
       {/* Modals */}
