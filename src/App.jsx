@@ -8,6 +8,7 @@ import { ProfileModal } from './components/ProfileModal';
 import { ShareModal } from './components/ShareModal';
 import { AuthModal } from './components/AuthModal';
 import { ResetConfirmationModal } from './components/ResetConfirmationModal';
+import { ManualEntryModal } from './components/ManualEntryModal';
 import { 
   auth, 
   signOut,
@@ -70,12 +71,13 @@ export default function App() {
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
   const [showResetModal, setShowResetModal] = useState(false);
+  const [showManualEntryModal, setShowManualEntryModal] = useState(false);
 
   // Current Hour Slot
   const currentHour = new Date().getHours();
   const todayStr = new Date().toISOString().split('T')[0];
 
-  // Calculate High-Precision Calories & Distance
+  // Calculate High-Precision Active Calories & Distance (EXCLUDES BMR)
   const caloriesData = calculateCalories(totalDailySteps, profile);
 
   // Expose Native Android Bridge Window Listener
@@ -149,6 +151,37 @@ export default function App() {
     setShowProfileModal(true);
   };
 
+  // Save Manual Historical Date-wise Step & Active Calorie Entry
+  const handleSaveManualEntry = async (entryData) => {
+    const { dateStr, steps, activeKcal, distanceKm } = entryData;
+
+    // If entry date is today, update current live state
+    if (dateStr === todayStr) {
+      setHourlyData(prev => {
+        const next = [...prev];
+        const hour = new Date().getHours();
+        next[hour] = { ...next[hour], steps: Math.max(next[hour].steps, steps) };
+        return next;
+      });
+    }
+
+    // Save to Firestore subcollection date-wise
+    if (user && user.uid && user.uid !== 'guest') {
+      const customCalorieObj = {
+        totalKcal: activeKcal,
+        activeKcal: activeKcal,
+        restingKcal: 0,
+        bmrDaily: Math.round(calculateCalories(steps, profile).bmrDaily),
+        distanceKm: distanceKm || parseFloat((steps * 0.00075).toFixed(2)),
+        durationMins: Math.round(steps / 100)
+      };
+      await saveDailyLogsToDb(user.uid, dateStr, steps, profile.dailyGoal, customCalorieObj, hourlyData);
+      alert(`✅ Successfully logged ${steps.toLocaleString()} steps and ${activeKcal} active kcal for ${dateStr}!`);
+    } else {
+      alert(`✅ Logged ${steps.toLocaleString()} steps locally for ${dateStr}! (Sign in to sync to Firebase)`);
+    }
+  };
+
   // Sync profile changes to user-keyed localStorage
   useEffect(() => {
     const key = getUserKey('pacepulse_profile');
@@ -191,7 +224,7 @@ export default function App() {
     }
   }, [isGoalReached]);
 
-  // Handheld Walking Pedometer Engine (0.85 m/s² Peak Filter)
+  // Handheld Walking Pedometer Engine
   useEffect(() => {
     let gravityX = 0;
     let gravityY = 0;
@@ -234,8 +267,7 @@ export default function App() {
 
       const now = Date.now();
 
-      // Handheld walking sensitivity threshold (0.85 m/s²)
-      if (smoothedMag > 0.85 && (now - lastStepTime) >= 200 && (now - lastStepTime) <= 1800) {
+      if (smoothedMag > 0.65 && (now - lastStepTime) >= 150 && (now - lastStepTime) <= 1800) {
         lastStepTime = now;
         setHourlyData(prev => {
           const next = [...prev];
@@ -280,7 +312,6 @@ export default function App() {
     setUser(null);
     localStorage.removeItem('pacepulse_user');
     
-    // Reset view to clean state
     setHourlyData(generateEmptyHourlyData());
     setProfile(DEFAULT_PROFILE);
     setStreakDays(0);
@@ -298,13 +329,43 @@ export default function App() {
         onOpenProfile={() => setShowProfileModal(true)}
       />
 
+      {/* Action Bar for Manual Date Entry */}
+      <div style={{
+        maxWidth: '1200px',
+        width: '100%',
+        margin: '16px auto 0',
+        padding: '0 16px',
+        display: 'flex',
+        justifyContent: 'flex-end'
+      }}>
+        <button
+          onClick={() => setShowManualEntryModal(true)}
+          style={{
+            padding: '10px 18px',
+            borderRadius: '12px',
+            background: 'rgba(59, 130, 246, 0.15)',
+            border: '1px solid rgba(59, 130, 246, 0.4)',
+            color: '#60a5fa',
+            fontSize: '13px',
+            fontWeight: 700,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            transition: 'all 0.2s ease'
+          }}
+        >
+          <span>📅</span> Log Past Activity / Date Entry
+        </button>
+      </div>
+
       {/* Main Dashboard Layout */}
       <main style={{
         flex: 1,
         maxWidth: '1200px',
         width: '100%',
         margin: '0 auto',
-        padding: '28px 16px 60px',
+        padding: '16px 16px 60px',
         display: 'flex',
         flexDirection: 'column',
         gap: '24px'
@@ -346,7 +407,7 @@ export default function App() {
         color: 'var(--text-dim)',
         background: 'rgba(7, 9, 14, 0.9)'
       }}>
-        PacePulse AI — Handheld Pedometer & Firebase Cloud Sync Engine
+        PacePulse AI — High Precision Active Calorie Tracker & 24/7 Background Standby Engine
       </footer>
 
       {/* Modals */}
@@ -381,6 +442,13 @@ export default function App() {
         <ResetConfirmationModal
           onConfirmReset={handleConfirmReset}
           onClose={() => setShowResetModal(false)}
+        />
+      )}
+
+      {showManualEntryModal && (
+        <ManualEntryModal
+          onSaveEntry={handleSaveManualEntry}
+          onClose={() => setShowManualEntryModal(false)}
         />
       )}
     </div>

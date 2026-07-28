@@ -50,7 +50,6 @@ export function calculateBMR(weightKg, heightCm, ageOrBirthDate, gender) {
   const w = parseFloat(weightKg) || 70;
   const h = parseFloat(heightCm) || 175;
   
-  // Calculate age automatically if birthDate string is passed
   const a = typeof ageOrBirthDate === 'string' && ageOrBirthDate.includes('-')
     ? calculateAgeFromBirthDate(ageOrBirthDate)
     : (parseFloat(ageOrBirthDate) || 25);
@@ -83,7 +82,7 @@ export function calculateDistanceKm(steps, strideCm) {
 }
 
 /**
- * Calculates accurate total calories burned
+ * Calculates active calories burned (STRICTLY EXCLUDES BMR RESTING ENERGY)
  */
 export function calculateCalories(steps, profile, activeMinutes = null, cadence = 100) {
   const userAge = profile.birthDate 
@@ -109,24 +108,22 @@ export function calculateCalories(steps, profile, activeMinutes = null, cadence 
     };
   }
 
-  // Duration in hours
+  // Active Duration in hours
   const durationMins = activeMinutes || steps / cadence;
   const durationHours = durationMins / 60;
 
   // Determine MET based on cadence
   const met = getMETFromCadence(cadence);
 
-  // Active energy expenditure (Kcal) = MET * Weight(kg) * Hours
+  // Active energy expenditure (Kcal) = MET * Weight(kg) * Hours (EXCLUDES BMR RESTING CALORIES)
   const activeKcal = met * profile.weightKg * durationHours;
-
-  // BMR resting energy for that time slice
   const restingKcal = (bmrDaily / 24) * durationHours;
 
-  const totalKcal = Math.round(activeKcal + restingKcal);
+  const activeKcalRounded = Math.round(activeKcal);
 
   return {
-    totalKcal: Math.max(1, totalKcal),
-    activeKcal: Math.round(activeKcal),
+    totalKcal: activeKcalRounded,
+    activeKcal: activeKcalRounded,
     restingKcal: Math.round(restingKcal),
     bmrDaily: Math.round(bmrDaily),
     distanceKm,
