@@ -6,21 +6,24 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.net.Uri
 import android.os.Bundle
 import android.util.Log
 import android.webkit.ConsoleMessage
 import android.webkit.WebChromeClient
-import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
+import androidx.webkit.WebViewAssetLoader
+import androidx.webkit.WebViewAssetLoader.AssetsPathHandler
 import kotlin.math.sqrt
 
 /**
- * PacePulse AI - 100% Offline Self-Contained Native Android Application Window
- * Loads Embedded Local Android Asset Bundle (file:///android_asset/index.html)
+ * PacePulse AI - 100% Offline Native Android Application Window
+ * Uses AndroidX WebViewAssetLoader for 100% local ES module & sensor execution
  */
 class MainActivity : ComponentActivity(), SensorEventListener {
 
@@ -49,6 +52,11 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
 
+        // AndroidX WebViewAssetLoader for offline local asset serving (bypasses file:// CORS & ES module restriction)
+        val assetLoader = WebViewAssetLoader.Builder()
+            .addPathHandler("/", AssetsPathHandler(this))
+            .build()
+
         // Native Full Screen WebView Container
         webView = WebView(this).apply {
             settings.javaScriptEnabled = true
@@ -56,19 +64,15 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             settings.databaseEnabled = true
             settings.allowFileAccess = true
             settings.allowContentAccess = true
-            settings.allowFileAccessFromFileURLs = true
-            settings.allowUniversalAccessFromFileURLs = true
             settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-            settings.cacheMode = WebSettings.LOAD_NO_CACHE
+            settings.cacheMode = WebSettings.LOAD_DEFAULT
 
             webViewClient = object : WebViewClient() {
-                override fun onReceivedError(
+                override fun shouldInterceptRequest(
                     view: WebView?,
-                    request: WebResourceRequest?,
-                    error: WebResourceError?
-                ) {
-                    super.onReceivedError(view, request, error)
-                    Log.e("PacePulseWebView", "Error loading asset: ${error?.description} (${request?.url})")
+                    request: WebResourceRequest?
+                ): WebResourceResponse? {
+                    return request?.url?.let { assetLoader.shouldInterceptRequest(it) }
                 }
             }
 
@@ -79,8 +83,8 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                 }
             }
 
-            // Load 100% self-contained local Android asset bundle (No Netlify or external URLs!)
-            loadUrl("file:///android_asset/index.html")
+            // Load local asset via AndroidX WebViewAssetLoader domain (100% Offline, Zero Netlify!)
+            loadUrl("https://appassets.androidplatform.net/index.html")
         }
 
         setContentView(webView)
