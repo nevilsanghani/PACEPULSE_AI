@@ -29,7 +29,12 @@ jobs:
           npm ci
           npm run build
 
-      - name: Build Android APK
+      - name: Bundle Web UI into Android Assets
+        run: |
+          mkdir -p pacepulse-android/app/src/main/assets
+          cp -r dist/* pacepulse-android/app/src/main/assets/
+
+      - name: Build Standalone Android APK
         run: |
           cd pacepulse-android
           chmod +x gradlew

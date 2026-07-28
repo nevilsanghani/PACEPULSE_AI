@@ -15,8 +15,8 @@ import androidx.activity.ComponentActivity
 import kotlin.math.sqrt
 
 /**
- * PacePulse AI - Native Android Application Window
- * Loads Full Web App UI with Google Fit Standard Pedometer Hardware Sensor Filter
+ * PacePulse AI - 100% Offline Self-Contained Native Android Application Window
+ * Loads Embedded Local Android Asset Bundle (file:///android_asset/index.html)
  */
 class MainActivity : ComponentActivity(), SensorEventListener {
 
@@ -52,14 +52,16 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             settings.databaseEnabled = true
             settings.allowFileAccess = true
             settings.allowContentAccess = true
+            settings.allowFileAccessFromFileURLs = true
+            settings.allowUniversalAccessFromFileURLs = true
             settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
             settings.cacheMode = WebSettings.LOAD_DEFAULT
 
             webViewClient = WebViewClient()
             webChromeClient = WebChromeClient()
 
-            // Load live app domain or local web asset
-            loadUrl("https://pacepulse-ai.netlify.app")
+            // Load 100% self-contained local Android asset bundle (No Netlify or external URLs!)
+            loadUrl("file:///android_asset/index.html")
         }
 
         setContentView(webView)
