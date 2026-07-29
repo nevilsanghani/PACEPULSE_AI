@@ -86,3 +86,5 @@ object PacePulseWidgetHelper {
         }
     }
 }
+
+typealias PacePulseWidget = PacePulseWidgetHelper

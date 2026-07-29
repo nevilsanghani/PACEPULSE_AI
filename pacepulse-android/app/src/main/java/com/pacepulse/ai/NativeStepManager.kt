@@ -92,7 +92,7 @@ object NativeStepManager {
             .putInt(KEY_TOTAL_STEPS_TODAY, 0)
             .apply()
         try {
-            PacePulseWidget.updateAllWidgets(context)
+            PacePulseWidgetHelper.updateAllWidgets(context)
         } catch (e: Exception) {}
         Log.d("PacePulseNative", "Native Step Manager Baseline Reset")
     }

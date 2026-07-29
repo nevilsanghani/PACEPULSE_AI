@@ -56,7 +56,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         fun setWidgetStyle(style: String) {
             Log.d("PacePulseBridge", "Set widget style called: $style")
             runOnUiThread {
-                PacePulseWidget.setWidgetStyle(this@MainActivity, style)
+                PacePulseWidgetHelper.updateAllWidgets(this@MainActivity)
             }
         }
     }
