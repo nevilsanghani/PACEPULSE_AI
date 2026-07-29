@@ -4,19 +4,16 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- PacePulse Flame outer -->
+    <!-- Navbar Activity Pulse Circle Badge -->
     <path
         android:fillColor="#00F2FE"
-        android:pathData="M54,24 C40,42 36,54 36,66 C36,76 44,84 54,84 C64,84 72,76 72,66 C72,54 68,42 54,24 Z" />
-    <!-- PacePulse Flame inner -->
+        android:pathData="M54,18 C34.12,18 18,34.12 18,54 C18,73.88 34.12,90 54,90 C73.88,90 90,73.88 90,54 C90,34.12 73.88,18 54,18 Z" />
+    
+    <!-- Navbar Heartbeat Activity Line (Dark #040914) -->
     <path
-        android:fillColor="#FF6B00"
-        android:pathData="M54,42 C48,52 46,58 46,65 C46,70 50,74 54,74 C58,74 62,70 62,65 C62,58 60,52 54,42 Z" />
-    <!-- Pulse Line -->
-    <path
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="3.5"
+        android:strokeColor="#040914"
+        android:strokeWidth="5.5"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:pathData="M38,64 L47,64 L52,55 L56,73 L61,64 L70,64" />
+        android:pathData="M28,54 L41,54 L47,38 L54,70 L61,44 L67,54 L80,54" />
 </vector>

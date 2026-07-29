@@ -40,7 +40,6 @@ export const auth = {
 
 /**
  * Save Daily Steps, Calories, & Distance Logs in Firebase Cloud Firestore
- * Creates document: users/{uid}/daily_logs/{dateStr}
  */
 export async function saveDailyLogsToDb(uid, dateStr, totalSteps, goal, caloriesData, hourlyData) {
   if (!uid || uid === 'guest') return;
@@ -76,7 +75,7 @@ export async function saveDailyLogsToDb(uid, dateStr, totalSteps, goal, calories
 }
 
 /**
- * Register User in Firebase Cloud Firestore Database ('users' collection & initial 'daily_logs')
+ * Register User in Firebase Cloud Firestore Database ('users' collection)
  */
 export async function registerUserInDb(email, password, displayName, profile) {
   const cleanEmail = email.trim().toLowerCase();
@@ -92,12 +91,10 @@ export async function registerUserInDb(email, password, displayName, profile) {
     profile
   };
 
-  // 1. Save to Local Device Cache
   const accounts = getLocalDbAccounts();
   accounts[cleanEmail] = userData;
   saveLocalDbAccounts(accounts);
 
-  // 2. Push Document directly to Firebase Cloud Firestore 'users' collection
   try {
     const firestoreBody = {
       fields: {
@@ -129,7 +126,6 @@ export async function registerUserInDb(email, password, displayName, profile) {
       body: JSON.stringify(firestoreBody)
     });
 
-    // 3. Immediately Create Initial Today's Daily Log in Firestore!
     const emptyHourly = Array.from({ length: 24 }, (_, i) => ({
       hour: i,
       label: `${i.toString().padStart(2, '0')}:00`,
@@ -160,7 +156,6 @@ export async function loginUserInDb(email, password) {
     }
   }
 
-  // Query Firebase Cloud Firestore Document
   try {
     const uid = `usr_${cleanEmail.replace(/[^a-z0-9]/g, '_')}`;
     const res = await fetch(`${FIRESTORE_REST_BASE}/users/${uid}`).catch(() => null);
@@ -205,6 +200,57 @@ export async function loginUserInDb(email, password) {
     success: false, 
     error: 'No account found with this email. Please check your credentials or click "Create New Account".' 
   };
+}
+
+/**
+ * Validate if a target user exists in Firebase Database by email, displayName, or @instagram_handle
+ */
+export async function validateUserExistsInDb(searchQuery) {
+  const clean = searchQuery.trim().toLowerCase().replace('@', '');
+  if (!clean) return { exists: false, error: 'Please enter a valid username, email, or Instagram handle.' };
+
+  // 1. Check local registered accounts DB
+  const accounts = getLocalDbAccounts();
+  const matchedLocalKey = Object.keys(accounts).find(emailKey => {
+    const acc = accounts[emailKey];
+    const dName = (acc.displayName || '').toLowerCase();
+    const eMail = (acc.email || '').toLowerCase();
+    return eMail === clean || dName === clean || eMail.split('@')[0] === clean;
+  });
+
+  if (matchedLocalKey) {
+    const target = accounts[matchedLocalKey];
+    return {
+      exists: true,
+      targetUser: {
+        uid: target.uid,
+        displayName: target.displayName || target.email.split('@')[0],
+        email: target.email
+      }
+    };
+  }
+
+  // 2. Query Cloud Firestore 'users'
+  try {
+    const uid = `usr_${clean.replace(/[^a-z0-9]/g, '_')}`;
+    const res = await fetch(`${FIRESTORE_REST_BASE}/users/${uid}`).catch(() => null);
+    if (res && res.ok) {
+      const docData = await res.json();
+      if (docData && docData.fields) {
+        const f = docData.fields;
+        return {
+          exists: true,
+          targetUser: {
+            uid: f.uid ? f.uid.stringValue : uid,
+            displayName: f.displayName ? f.displayName.stringValue : clean,
+            email: f.email ? f.email.stringValue : `${clean}@example.com`
+          }
+        };
+      }
+    }
+  } catch (e) {}
+
+  return { exists: false, error: `❌ User '${searchQuery}' does not exist on PacePulse AI. Please verify their username or email.` };
 }
 
 /**

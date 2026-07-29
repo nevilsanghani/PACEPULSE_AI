@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
+import { validateUserExistsInDb } from '../firebase';
 
 export function SocialLeaderboardModal({ user, userSteps, activeKcal, distanceKm, onClose, onUpdatePendingCount }) {
   const [activeTab, setActiveTab] = useState('leaderboard'); // 'leaderboard' | 'friends' | 'instagram'
   const [searchQuery, setSearchQuery] = useState('');
+  const [isSearching, setIsSearching] = useState(false);
   const [instaHandle, setInstaHandle] = useState(() => {
     return localStorage.getItem('pacepulse_insta_handle') || '';
   });
@@ -12,19 +14,27 @@ export function SocialLeaderboardModal({ user, userSteps, activeKcal, distanceKm
     return saved ? JSON.parse(saved) : [];
   });
 
+  // Incoming requests sent TO me
   const [pendingRequests, setPendingRequests] = useState(() => {
     const saved = localStorage.getItem('pacepulse_pending_requests');
     return saved ? JSON.parse(saved) : [];
   });
 
-  // Sync friends list and pending requests to local storage
+  // Outgoing requests sent BY me
+  const [outgoingRequests, setOutgoingRequests] = useState(() => {
+    const saved = localStorage.getItem('pacepulse_outgoing_requests');
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  // Sync state to local storage and update pending badge
   useEffect(() => {
     localStorage.setItem('pacepulse_friends_list', JSON.stringify(friendsList));
     localStorage.setItem('pacepulse_pending_requests', JSON.stringify(pendingRequests));
+    localStorage.setItem('pacepulse_outgoing_requests', JSON.stringify(outgoingRequests));
     if (onUpdatePendingCount) {
       onUpdatePendingCount(pendingRequests.length);
     }
-  }, [friendsList, pendingRequests, onUpdatePendingCount]);
+  }, [friendsList, pendingRequests, outgoingRequests, onUpdatePendingCount]);
 
   // Handle Instagram handle save
   const handleSaveInstaHandle = (e) => {
@@ -49,7 +59,7 @@ export function SocialLeaderboardModal({ user, userSteps, activeKcal, distanceKm
       navigator.share({ title: 'PacePulse AI Leaderboard', text, url: 'https://pacepulse-ai.web.app' }).catch(() => {});
     } else {
       navigator.clipboard.writeText(text);
-      alert('✨ Leaderboard invite copied to clipboard! Paste it on your Instagram Story or DMs so your friends can add you on PacePulse AI!');
+      alert('✨ Leaderboard invite copied to clipboard! Share on your Instagram Story or DM so your friends can connect with you!');
     }
   };
 
@@ -67,25 +77,49 @@ export function SocialLeaderboardModal({ user, userSteps, activeKcal, distanceKm
   const leaderboardEntries = [currentUserEntry, ...friendsList.filter(f => f.status === 'connected')]
     .sort((a, b) => b.steps - a.steps);
 
-  const handleSendRequest = (nameOrInsta) => {
-    if (!nameOrInsta.trim()) return;
-    const isInsta = nameOrInsta.startsWith('@');
-    const cleanName = nameOrInsta.trim();
+  // Send 2-Way Friend Request with User Validation
+  const handleSendRequest = async (query) => {
+    if (!query.trim()) return;
+    setIsSearching(true);
 
-    const newRequest = {
+    const validation = await validateUserExistsInDb(query);
+    setIsSearching(false);
+
+    if (!validation.exists) {
+      alert(validation.error);
+      return;
+    }
+
+    const target = validation.targetUser;
+
+    // Check if already connected
+    if (friendsList.some(f => f.id === target.uid || f.name.toLowerCase() === target.displayName.toLowerCase())) {
+      alert(`⚠️ You are already connected with ${target.displayName}!`);
+      return;
+    }
+
+    // Check if outgoing request already sent
+    if (outgoingRequests.some(r => r.toUid === target.uid)) {
+      alert(`⏳ Connection request to ${target.displayName} is already pending acceptance.`);
+      return;
+    }
+
+    const newOutgoing = {
       id: Date.now().toString(),
-      name: cleanName,
-      insta: isInsta ? cleanName : ''
+      toUid: target.uid,
+      toName: target.displayName,
+      toEmail: target.email,
+      sentAt: new Date().toISOString()
     };
 
-    setPendingRequests([...pendingRequests, newRequest]);
+    setOutgoingRequests([...outgoingRequests, newOutgoing]);
     setSearchQuery('');
-    alert(`✨ Connection request sent to ${cleanName}!`);
+    alert(`✨ Connection request sent to ${target.displayName}! They will receive your request in their Notification Bell.`);
   };
 
   const handleAcceptRequest = (req) => {
     const acceptedFriend = {
-      id: req.id,
+      id: req.id || Date.now().toString(),
       name: req.name,
       insta: req.insta || '',
       steps: 0,
@@ -95,11 +129,15 @@ export function SocialLeaderboardModal({ user, userSteps, activeKcal, distanceKm
     };
     setFriendsList([...friendsList, acceptedFriend]);
     setPendingRequests(pendingRequests.filter(r => r.id !== req.id));
-    alert(`🎉 Connected with ${req.name}!`);
+    alert(`🎉 Connected with ${req.name}! Both of you can now see each other on the Leaderboard.`);
   };
 
   const handleDeclineRequest = (reqId) => {
     setPendingRequests(pendingRequests.filter(r => r.id !== reqId));
+  };
+
+  const handleCancelOutgoing = (reqId) => {
+    setOutgoingRequests(outgoingRequests.filter(r => r.id !== reqId));
   };
 
   const handleRemoveFriend = (friendId, friendName) => {
@@ -142,7 +180,7 @@ export function SocialLeaderboardModal({ user, userSteps, activeKcal, distanceKm
               🏆 Social Connections & Leaderboard
             </h2>
             <p style={{ margin: '4px 0 0', fontSize: '13px', color: 'var(--text-dim)' }}>
-              Connect with real friends & Instagram handles to compete on steps
+              Connect with real verified users & Instagram handles to compete on steps
             </p>
           </div>
           <button 
@@ -255,14 +293,14 @@ export function SocialLeaderboardModal({ user, userSteps, activeKcal, distanceKm
           </div>
         )}
 
-        {/* Tab 2: Connections & Pending Requests */}
+        {/* Tab 2: Connections, Incoming Requests & Outgoing Requests */}
         {activeTab === 'friends' && (
           <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '16px' }}>
             {/* Search and Add Friend by Name or Instagram Handle */}
             <div style={{ display: 'flex', gap: '8px' }}>
               <input
                 type="text"
-                placeholder="Enter Name or @instagram_handle..."
+                placeholder="Search registered username or email..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 style={{
@@ -278,7 +316,7 @@ export function SocialLeaderboardModal({ user, userSteps, activeKcal, distanceKm
               />
               <button
                 onClick={() => handleSendRequest(searchQuery)}
-                disabled={!searchQuery.trim()}
+                disabled={!searchQuery.trim() || isSearching}
                 style={{
                   padding: '10px 16px',
                   borderRadius: '10px',
@@ -289,15 +327,15 @@ export function SocialLeaderboardModal({ user, userSteps, activeKcal, distanceKm
                   cursor: searchQuery.trim() ? 'pointer' : 'not-allowed'
                 }}
               >
-                + Connect
+                {isSearching ? 'Checking...' : '+ Connect'}
               </button>
             </div>
 
-            {/* Pending Requests */}
-            {pendingRequests.length > 0 ? (
+            {/* Incoming Requests Sent TO Me */}
+            {pendingRequests.length > 0 && (
               <div>
                 <div style={{ fontSize: '12px', fontWeight: 700, color: '#fbbf24', textTransform: 'uppercase', marginBottom: '8px' }}>
-                  Pending Requests ({pendingRequests.length})
+                  Incoming Connection Requests ({pendingRequests.length})
                 </div>
                 {pendingRequests.map(req => (
                   <div key={req.id} style={{
@@ -312,6 +350,7 @@ export function SocialLeaderboardModal({ user, userSteps, activeKcal, distanceKm
                   }}>
                     <div>
                       <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-bright)' }}>{req.name}</div>
+                      <div style={{ fontSize: '11px', color: 'var(--text-dim)' }}>wants to connect on Leaderboard</div>
                     </div>
                     <div style={{ display: 'flex', gap: '6px' }}>
                       <button
@@ -348,9 +387,45 @@ export function SocialLeaderboardModal({ user, userSteps, activeKcal, distanceKm
                   </div>
                 ))}
               </div>
-            ) : (
-              <div style={{ fontSize: '12px', color: 'var(--text-dim)', fontStyle: 'italic' }}>
-                No pending requests.
+            )}
+
+            {/* Outgoing Requests Sent BY Me (Pending Acceptance) */}
+            {outgoingRequests.length > 0 && (
+              <div>
+                <div style={{ fontSize: '12px', fontWeight: 700, color: '#60a5fa', textTransform: 'uppercase', marginBottom: '8px' }}>
+                  Sent Requests Pending Acceptance ({outgoingRequests.length})
+                </div>
+                {outgoingRequests.map(req => (
+                  <div key={req.id} style={{
+                    background: 'rgba(59, 130, 246, 0.08)',
+                    border: '1px solid rgba(59, 130, 246, 0.2)',
+                    borderRadius: '12px',
+                    padding: '12px 16px',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    marginBottom: '8px'
+                  }}>
+                    <div>
+                      <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-bright)' }}>{req.toName}</div>
+                      <div style={{ fontSize: '11px', color: '#60a5fa' }}>⏳ Waiting for user to accept...</div>
+                    </div>
+                    <button
+                      onClick={() => handleCancelOutgoing(req.id)}
+                      style={{
+                        padding: '6px 12px',
+                        borderRadius: '8px',
+                        background: 'rgba(255, 255, 255, 0.08)',
+                        border: 'none',
+                        color: 'var(--text-dim)',
+                        fontSize: '11px',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ))}
               </div>
             )}
 
@@ -361,7 +436,7 @@ export function SocialLeaderboardModal({ user, userSteps, activeKcal, distanceKm
               </div>
               {friendsList.filter(f => f.status === 'connected').length === 0 ? (
                 <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-dim)', fontSize: '13px' }}>
-                  You have no connected friends yet. Add a friend or Instagram handle above!
+                  You have no connected friends yet. Search a registered username above to connect!
                 </div>
               ) : (
                 friendsList.filter(f => f.status === 'connected').map(friend => (
