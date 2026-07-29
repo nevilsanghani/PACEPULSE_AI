@@ -10,7 +10,7 @@ import java.util.Locale
 
 /**
  * PacePulse AI - Absolute 24/7 Hardware Step Counter Engine
- * Syncs exact today's step count using hardware baseline subtraction (Google Fit / Samsung Health Parity)
+ * Syncs exact today's step count using hardware baseline subtraction & updates Home Screen Widget
  */
 object NativeStepManager {
 
@@ -55,6 +55,11 @@ object NativeStepManager {
             }
         }
 
+        // Update Android Home Screen AppWidget
+        try {
+            PacePulseWidget.updateAllWidgets(context)
+        } catch (e: Exception) {}
+
         Log.d("PacePulseNative", "Current Hardware Total: $currentTotal | Midnight Baseline: $midnightBaseline | Today Steps: $todaySteps")
         return todaySteps
     }
@@ -84,6 +89,9 @@ object NativeStepManager {
             .remove(KEY_BASELINE_DATE)
             .putInt(KEY_TOTAL_STEPS_TODAY, 0)
             .apply()
+        try {
+            PacePulseWidget.updateAllWidgets(context)
+        } catch (e: Exception) {}
         Log.d("PacePulseNative", "Native Step Manager Baseline Reset")
     }
 }

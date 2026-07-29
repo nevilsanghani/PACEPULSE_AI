@@ -1,5 +1,5 @@
 import React from 'react';
-import { Footprints, Flame, Navigation, Clock, RefreshCw, Share2, Trophy } from 'lucide-react';
+import { Footprints, Flame, Navigation, Clock, RefreshCw, Share2, Trophy, Zap } from 'lucide-react';
 
 export function StepRing({ 
   steps = 0, 
@@ -18,6 +18,12 @@ export function StepRing({
 
   const bmrDisplay = (caloriesData && typeof caloriesData.bmrDaily === 'number') ? caloriesData.bmrDaily : 1669;
 
+  const handleInstantSync = () => {
+    if (window.AndroidStepBridge && window.AndroidStepBridge.requestInstantSync) {
+      window.AndroidStepBridge.requestInstantSync();
+    }
+  };
+
   return (
     <div className="glass-card main-ring-card" style={{
       position: 'relative',
@@ -28,18 +34,20 @@ export function StepRing({
       border: '1px solid rgba(255, 255, 255, 0.08)',
       textAlign: 'center'
     }}>
-      {/* Top Action Buttons (Reset & Share) */}
+      {/* Top Action Buttons (Reset, Instant Sync & Share) */}
       <div style={{
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
-        marginBottom: '20px'
+        marginBottom: '20px',
+        flexWrap: 'wrap',
+        gap: '8px'
       }}>
         <button
           onClick={onOpenResetModal}
           className="btn-secondary"
           style={{
-            padding: '8px 14px',
+            padding: '8px 12px',
             fontSize: '12px',
             borderRadius: '12px',
             display: 'flex',
@@ -54,10 +62,30 @@ export function StepRing({
         </button>
 
         <button
+          onClick={handleInstantSync}
+          style={{
+            padding: '8px 14px',
+            fontSize: '12px',
+            borderRadius: '12px',
+            background: 'rgba(0, 242, 254, 0.15)',
+            border: '1px solid rgba(0, 242, 254, 0.4)',
+            color: '#00F2FE',
+            fontWeight: 700,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px'
+          }}
+          title="Query Hardware Sensor Instantly"
+        >
+          <Zap size={14} /> Sync Now
+        </button>
+
+        <button
           onClick={onOpenShareModal}
           className="btn-primary"
           style={{
-            padding: '8px 16px',
+            padding: '8px 14px',
             fontSize: '12px',
             borderRadius: '12px',
             display: 'flex',

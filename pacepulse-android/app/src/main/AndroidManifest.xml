@@ -44,6 +44,18 @@
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
             </intent-filter>
         </receiver>
+
+        <receiver
+            android:name=".PacePulseWidget"
+            android:exported="true"
+            android:label="PacePulse Step Tracker">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/pace_pulse_widget_info" />
+        </receiver>
     </application>
 
 </manifest>

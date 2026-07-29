@@ -11,7 +11,7 @@ import { AuthModal } from './components/AuthModal';
 import { ResetConfirmationModal } from './components/ResetConfirmationModal';
 import { HistoryModal } from './components/HistoryModal';
 import { SocialLeaderboardModal } from './components/SocialLeaderboardModal';
-import { speakMilestoneAnnouncement, setAudioCoachMuted } from './utils/audioCoach';
+import { speakMilestoneAnnouncement, speakGoalReachedAnnouncement, setAudioCoachMuted } from './utils/audioCoach';
 import { 
   auth, 
   signOut,
@@ -46,72 +46,53 @@ export default function App() {
     return saved ? JSON.parse(saved) : DEFAULT_PROFILE;
   });
 
-  // Hourly Breakdown State (24 hours)
-  const [hourlyData, setHourlyData] = useState(() => {
-    const key = user ? getUserKey('pacepulse_hourly', user) : 'pacepulse_hourly_guest';
-    const saved = localStorage.getItem(key);
-    return saved ? JSON.parse(saved) : generateEmptyHourlyData();
-  });
-
-  // Daily Steps Sum
-  const totalDailySteps = hourlyData.reduce((sum, h) => sum + h.steps, 0);
-
-  // Audio Coach Mute Toggle State
-  const [isMuted, setIsMuted] = useState(false);
-
-  // Pending Friend Requests Count
-  const [pendingCount, setPendingCount] = useState(() => {
-    const saved = localStorage.getItem('pacepulse_pending_requests');
-    return saved ? JSON.parse(saved).length : 0;
-  });
-
-  // Streak & History State
-  const [streakDays, setStreakDays] = useState(() => {
-    const key = user ? getUserKey('pacepulse_streak', user) : 'pacepulse_streak_guest';
-    const saved = localStorage.getItem(key);
-    return saved ? parseInt(saved) : 0;
-  });
-
-  const [weeklyHistory, setWeeklyHistory] = useState(() => {
-    const key = user ? getUserKey('pacepulse_history', user) : 'pacepulse_history_guest';
-    const saved = localStorage.getItem(key);
-    if (saved) return JSON.parse(saved);
-    return Array.from({ length: 7 }, () => ({ completed: false, steps: 0 }));
-  });
-
-  // Modals Visibility
+  // UI Modal Visibility States
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
   const [showResetModal, setShowResetModal] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [showSocialModal, setShowSocialModal] = useState(false);
+  const [socialTab, setSocialTab] = useState('leaderboard');
+  const [isAudioMuted, setIsMuted] = useState(false);
 
-  // Current Hour Slot & Date
-  const currentHour = new Date().getHours();
   const todayStr = new Date().toISOString().split('T')[0];
 
-  // Calculate High-Precision Active Calories & Distance (EXCLUDES BMR)
+  // 24-Hour Step Breakdown Array
+  const [hourlyData, setHourlyData] = useState(() => {
+    const key = user ? getUserKey('pacepulse_hourly', user) : 'pacepulse_hourly_guest';
+    const saved = localStorage.getItem(key);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length === 24) return parsed;
+      } catch (e) {}
+    }
+    return generateEmptyHourlyData();
+  });
+
+  // Active Streak Days Counter
+  const [streakDays, setStreakDays] = useState(() => {
+    const key = user ? getUserKey('pacepulse_streak', user) : 'pacepulse_streak_guest';
+    const saved = localStorage.getItem(key);
+    return saved ? parseInt(saved, 10) : 1;
+  });
+
+  // 7-Day History Log
+  const [weeklyHistory, setWeeklyHistory] = useState(() => {
+    const key = user ? getUserKey('pacepulse_history', user) : 'pacepulse_history_guest';
+    const saved = localStorage.getItem(key);
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  // Calculate sum of steps from 24 hourly buckets
+  const totalDailySteps = hourlyData.reduce((sum, h) => sum + (h.steps || 0), 0);
+
+  // Compute live Calories, Distance & MET Active Time
   const caloriesData = calculateCalories(totalDailySteps, profile);
 
-  // AI Voice Audio Coach Milestone Announcement Trigger
-  const [lastAnnouncedMilestone, setLastAnnouncedMilestone] = useState(0);
+  // Instant Native Android Hardware Step Sync Bridge & 1-Second Auto Polling
   useEffect(() => {
-    if (totalDailySteps > 0 && totalDailySteps % 1000 < 5 && totalDailySteps !== lastAnnouncedMilestone) {
-      setLastAnnouncedMilestone(totalDailySteps);
-      speakMilestoneAnnouncement(totalDailySteps, caloriesData.activeKcal, profile.dailyGoal);
-    }
-  }, [totalDailySteps, caloriesData.activeKcal, profile.dailyGoal, lastAnnouncedMilestone]);
-
-  // Audio Mute Handler
-  const handleToggleMute = () => {
-    const nextMuted = !isMuted;
-    setIsMuted(nextMuted);
-    setAudioCoachMuted(nextMuted);
-  };
-
-  // Native Android Bridge Window Listener (Absolute Step Sync & Delta Step Sync)
-  useEffect(() => {
-    window.syncNativeTodaySteps = (totalSteps = 0) => {
+    window.syncNativeTodaySteps = (totalSteps) => {
       setHourlyData(prev => {
         const next = [...prev];
         const hour = new Date().getHours();
@@ -137,7 +118,15 @@ export default function App() {
       });
     };
 
+    // Auto 1-second instant polling when app is active
+    const pollInterval = setInterval(() => {
+      if (window.AndroidStepBridge && window.AndroidStepBridge.requestInstantSync) {
+        window.AndroidStepBridge.requestInstantSync();
+      }
+    }, 1000);
+
     return () => {
+      clearInterval(pollInterval);
       delete window.syncNativeTodaySteps;
       delete window.addNativeSteps;
     };
@@ -168,31 +157,30 @@ export default function App() {
       }
     }
 
-    const hourlyKey = getUserKey('pacepulse_hourly', authenticatedUser);
-    const cloudLog = await getDailyLogsFromDb(authenticatedUser.uid, todayStr);
-    
-    if (cloudLog && cloudLog.hourlyData) {
-      setHourlyData(cloudLog.hourlyData);
-      localStorage.setItem(hourlyKey, JSON.stringify(cloudLog.hourlyData));
-    } else {
-      const savedHourly = localStorage.getItem(hourlyKey);
-      setHourlyData(savedHourly ? JSON.parse(savedHourly) : generateEmptyHourlyData());
+    try {
+      const cloudLogs = await getDailyLogsFromDb(authenticatedUser.uid);
+      if (cloudLogs && cloudLogs.length > 0) {
+        setWeeklyHistory(cloudLogs);
+        const historyKey = getUserKey('pacepulse_history', authenticatedUser);
+        localStorage.setItem(historyKey, JSON.stringify(cloudLogs));
+      }
+    } catch (e) {
+      console.warn("Cloud log sync error:", e);
     }
 
-    const streakKey = getUserKey('pacepulse_streak', authenticatedUser);
-    const savedStreak = localStorage.getItem(streakKey);
-    setStreakDays(savedStreak ? parseInt(savedStreak) : 0);
-
-    const historyKey = getUserKey('pacepulse_history', authenticatedUser);
-    const savedHistory = localStorage.getItem(historyKey);
-    setWeeklyHistory(savedHistory ? JSON.parse(savedHistory) : Array.from({ length: 7 }, () => ({ completed: false, steps: 0 })));
+    setShowAuthModal(false);
   };
 
-  const handleGuestLogin = (guestUser) => {
-    handleAuthSuccess(guestUser);
-    setShowProfileModal(true);
+  // Handle Sign Out
+  const handleSignOut = async () => {
+    try {
+      await signOut(auth);
+    } catch (e) {}
+    setUser(null);
+    localStorage.removeItem('pacepulse_user');
   };
 
+  // Sync profile state changes to LocalStorage
   useEffect(() => {
     const key = getUserKey('pacepulse_profile');
     localStorage.setItem(key, JSON.stringify(profile));
@@ -226,6 +214,7 @@ export default function App() {
         spread: 70,
         origin: { y: 0.6 }
       });
+      speakGoalReachedAnnouncement(profile.dailyGoal, caloriesData.activeKcal);
     }
   }, [isGoalReached]);
 
@@ -238,191 +227,95 @@ export default function App() {
     let gravityZ = 0;
     let lastStepTime = 0;
     const windowSize = 4;
-    const magBuffer = [];
-    const alpha = 0.8;
+    const accelBuffer = [];
 
-    const handleDeviceMotion = (event) => {
-      let userX = 0;
-      let userY = 0;
-      let userZ = 0;
+    const handleMotion = (event) => {
+      const acc = event.accelerationIncludingGravity;
+      if (!acc || acc.x === null) return;
 
-      if (event.acceleration && typeof event.acceleration.x === 'number' && event.acceleration.x !== null && (event.acceleration.x !== 0 || event.acceleration.y !== 0 || event.acceleration.z !== 0)) {
-        userX = event.acceleration.x || 0;
-        userY = event.acceleration.y || 0;
-        userZ = event.acceleration.z || 0;
-      } else if (event.accelerationIncludingGravity && typeof event.accelerationIncludingGravity.x === 'number') {
-        const rawX = event.accelerationIncludingGravity.x || 0;
-        const rawY = event.accelerationIncludingGravity.y || 0;
-        const rawZ = event.accelerationIncludingGravity.z || 0;
+      const alpha = 0.8;
+      gravityX = alpha * gravityX + (1 - alpha) * acc.x;
+      gravityY = alpha * gravityY + (1 - alpha) * acc.y;
+      gravityZ = alpha * gravityZ + (1 - alpha) * acc.z;
 
-        gravityX = alpha * gravityX + (1 - alpha) * rawX;
-        gravityY = alpha * gravityY + (1 - alpha) * rawY;
-        gravityZ = alpha * gravityZ + (1 - alpha) * rawZ;
+      const linearX = acc.x - gravityX;
+      const linearY = acc.y - gravityY;
+      const linearZ = acc.z - gravityZ;
 
-        userX = rawX - gravityX;
-        userY = rawY - gravityY;
-        userZ = rawZ - gravityZ;
-      }
+      const gMagnitude = Math.sqrt(linearX * linearX + linearY * linearY + linearZ * linearZ);
+      accelBuffer.push(gMagnitude);
+      if (accelBuffer.length > windowSize) accelBuffer.shift();
 
-      const userMagnitude = Math.sqrt(userX * userX + userY * userY + userZ * userZ);
-      magBuffer.push(userMagnitude);
-      if (magBuffer.length > windowSize) magBuffer.shift();
-      const smoothedMag = magBuffer.reduce((a, b) => a + b, 0) / magBuffer.length;
+      const smoothMag = accelBuffer.reduce((a, b) => a + b, 0) / accelBuffer.length;
       const now = Date.now();
 
-      if (smoothedMag > 0.65 && (now - lastStepTime) >= 150 && (now - lastStepTime) <= 1800) {
+      if (smoothMag > 2.5 && (now - lastStepTime) > 300) {
         lastStepTime = now;
+        const currentHour = new Date().getHours();
+
         setHourlyData(prev => {
           const next = [...prev];
-          const hour = new Date().getHours();
-          next[hour] = {
-            ...next[hour],
-            steps: next[hour].steps + 1
+          next[currentHour] = {
+            ...next[currentHour],
+            steps: next[currentHour].steps + 1
           };
           return next;
         });
       }
     };
 
-    if (typeof window !== 'undefined' && window.DeviceMotionEvent) {
-      window.addEventListener('devicemotion', handleDeviceMotion, true);
+    if (window.DeviceMotionEvent) {
+      window.addEventListener('devicemotion', handleMotion);
     }
+
     return () => {
-      if (typeof window !== 'undefined' && window.DeviceMotionEvent) {
-        window.removeEventListener('devicemotion', handleDeviceMotion, true);
+      if (window.DeviceMotionEvent) {
+        window.removeEventListener('devicemotion', handleMotion);
       }
     };
   }, []);
 
-  const handleConfirmReset = () => {
-    if (window.AndroidStepBridge && window.AndroidStepBridge.resetNativeBaseline) {
-      try {
-        window.AndroidStepBridge.resetNativeBaseline();
-      } catch (e) {}
-    }
+  // Reset daily steps baseline
+  const handleResetBaseline = () => {
     setHourlyData(generateEmptyHourlyData());
-    setStreakDays(0);
-    setWeeklyHistory(Array.from({ length: 7 }, () => ({ completed: false, steps: 0 })));
-    setShowResetModal(false);
+
+    if (window.AndroidStepBridge && window.AndroidStepBridge.resetNativeBaseline) {
+      window.AndroidStepBridge.resetNativeBaseline();
+    }
   };
 
-  const handleSignOut = async () => {
-    if (auth) {
-      try {
-        await signOut(auth);
-      } catch (e) {}
-    }
-    setUser(null);
-    localStorage.removeItem('pacepulse_user');
-    setHourlyData(generateEmptyHourlyData());
-    setProfile(DEFAULT_PROFILE);
-    setStreakDays(0);
-    setWeeklyHistory(Array.from({ length: 7 }, () => ({ completed: false, steps: 0 })));
+  const handleToggleAudioMute = () => {
+    const nextMuted = !isAudioMuted;
+    setIsMuted(nextMuted);
+    setAudioCoachMuted(nextMuted);
+  };
+
+  const handleOpenSocialTab = (tab = 'leaderboard') => {
+    setSocialTab(tab);
+    setShowSocialModal(true);
   };
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-      {/* Top Sticky Navbar */}
-      <Navbar
-        user={user}
-        streakDays={streakDays}
-        pendingCount={pendingCount}
-        onOpenAuthModal={() => setShowAuthModal(true)}
-        onSignOut={handleSignOut}
+    <div className="app-container" style={{ minHeight: '100vh', background: 'var(--bg-gradient)', color: 'var(--text-main)' }}>
+      {/* Dynamic Navigation Bar */}
+      <Navbar 
+        profile={profile}
         onOpenProfile={() => setShowProfileModal(true)}
-        onOpenSocial={() => setShowSocialModal(true)}
+        onOpenHistory={() => setShowHistoryModal(true)}
+        onOpenSocial={handleOpenSocialTab}
+        user={user}
+        onOpenAuth={() => setShowAuthModal(true)}
+        onSignOut={handleSignOut}
+        isAudioMuted={isAudioMuted}
+        onToggleAudioMute={handleToggleAudioMute}
       />
 
-      {/* Action Bar for Social Connections, Audio Coach & History */}
-      <div style={{
-        maxWidth: '1200px',
-        width: '100%',
-        margin: '16px auto 0',
-        padding: '0 16px',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        flexWrap: 'wrap',
-        gap: '12px'
-      }}>
-        {/* Left Action Buttons */}
-        <div style={{ display: 'flex', gap: '10px' }}>
-          <button
-            onClick={() => setShowSocialModal(true)}
-            style={{
-              padding: '10px 18px',
-              borderRadius: '12px',
-              background: 'linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%)',
-              border: 'none',
-              color: 'white',
-              fontSize: '13px',
-              fontWeight: 700,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              boxShadow: '0 4px 12px rgba(139, 92, 246, 0.3)'
-            }}
-          >
-            <span>🏆</span> Friends Leaderboard & Requests
-          </button>
-
-          <button
-            onClick={handleToggleMute}
-            style={{
-              padding: '10px 14px',
-              borderRadius: '12px',
-              background: isMuted ? 'rgba(239, 68, 68, 0.15)' : 'rgba(16, 185, 129, 0.15)',
-              border: `1px solid ${isMuted ? 'rgba(239, 68, 68, 0.4)' : 'rgba(16, 185, 129, 0.4)'}`,
-              color: isMuted ? '#f87171' : '#34d399',
-              fontSize: '13px',
-              fontWeight: 700,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px'
-            }}
-          >
-            <span>{isMuted ? '🔇' : '🎙️'}</span> {isMuted ? 'Voice Muted' : 'Voice Coach ON'}
-          </button>
-        </div>
-
-        {/* Right Action Button */}
-        <button
-          onClick={() => setShowHistoryModal(true)}
-          style={{
-            padding: '10px 18px',
-            borderRadius: '12px',
-            background: 'rgba(59, 130, 246, 0.15)',
-            border: '1px solid rgba(59, 130, 246, 0.4)',
-            color: '#60a5fa',
-            fontSize: '13px',
-            fontWeight: 700,
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px'
-          }}
-        >
-          <span>📜</span> View Activity History Log
-        </button>
-      </div>
-
-      {/* Main Dashboard Layout */}
-      <main style={{
-        flex: 1,
-        maxWidth: '1200px',
-        width: '100%',
-        margin: '0 auto',
-        padding: '16px 16px 60px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '24px'
-      }}>
-        {/* Top Section: Main Step Gauge & Streak Summary */}
-        <div className="dashboard-grid">
-          {/* Circular Step Ring Card */}
-          <StepRing
+      {/* Main Content Layout */}
+      <main style={{ maxWidth: '1200px', margin: '0 auto', padding: '24px 16px 80px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '24px' }}>
+          
+          {/* Main Step Ring Widget with Instant Refresh */}
+          <StepRing 
             steps={totalDailySteps}
             goal={profile.dailyGoal}
             caloriesData={caloriesData}
@@ -431,92 +324,79 @@ export default function App() {
             isGoalReached={isGoalReached}
           />
 
-          {/* Streak & Weekly Badges Card */}
-          <StreakTracker
+          {/* 7-Day Weekly Progress Bar Chart */}
+          <WeeklyStepChart 
+            todaySteps={totalDailySteps}
+            dailyGoal={profile.dailyGoal}
+            weeklyHistory={weeklyHistory}
+          />
+
+          {/* 24-Hour Breakdown Hourly Chart */}
+          <HourlyChart 
+            hourlyData={hourlyData}
+            currentHour={new Date().getHours()}
+          />
+
+          {/* Streak & Consistency Badge Section */}
+          <StreakTracker 
             streakDays={streakDays}
             history={weeklyHistory}
             dailyGoal={profile.dailyGoal}
             onOpenShareModal={() => setShowShareModal(true)}
           />
+
         </div>
-
-        {/* Weekly Step Bar Chart (X=Day of Week, Y=Steps) */}
-        <WeeklyStepChart
-          totalDailySteps={totalDailySteps}
-          dailyGoal={profile.dailyGoal}
-          history={weeklyHistory}
-        />
-
-        {/* Bottom Section: 24-Hour Step Breakdown Chart */}
-        <HourlyChart
-          hourlyData={hourlyData}
-          currentHour={currentHour}
-        />
       </main>
 
-      {/* Footer */}
-      <footer style={{
-        padding: '20px',
-        textAlign: 'center',
-        borderTop: '1px solid rgba(255, 255, 255, 0.08)',
-        fontSize: '12px',
-        color: 'var(--text-dim)',
-        background: 'rgba(7, 9, 14, 0.9)'
-      }}>
-        PacePulse AI — AI Voice Coach, Social Leaderboards & High Precision Active Calorie Engine
-      </footer>
-
       {/* Modals */}
-      {showAuthModal && (
-        <AuthModal
-          onAuthSuccess={handleAuthSuccess}
-          onGuestLogin={handleGuestLogin}
-          onClose={() => setShowAuthModal(false)}
-        />
-      )}
-
       {showProfileModal && (
-        <ProfileModal
+        <ProfileModal 
           profile={profile}
-          onSave={setProfile}
+          onSave={(updatedProfile) => setProfile(updatedProfile)}
           onClose={() => setShowProfileModal(false)}
         />
       )}
 
       {showShareModal && (
-        <ShareModal
+        <ShareModal 
           steps={totalDailySteps}
           goal={profile.dailyGoal}
-          streakDays={streakDays}
           caloriesData={caloriesData}
-          profile={profile}
+          streakDays={streakDays}
           onClose={() => setShowShareModal(false)}
         />
       )}
 
       {showResetModal && (
-        <ResetConfirmationModal
-          onConfirmReset={handleConfirmReset}
+        <ResetConfirmationModal 
+          onConfirmReset={handleResetBaseline}
           onClose={() => setShowResetModal(false)}
         />
       )}
 
       {showHistoryModal && (
-        <HistoryModal
-          user={user}
-          profile={profile}
+        <HistoryModal 
+          userId={user ? user.uid : 'guest'}
+          localHistory={weeklyHistory}
+          dailyGoal={profile.dailyGoal}
           onClose={() => setShowHistoryModal(false)}
         />
       )}
 
       {showSocialModal && (
-        <SocialLeaderboardModal
-          user={user}
-          userSteps={totalDailySteps}
-          activeKcal={caloriesData.activeKcal}
-          distanceKm={caloriesData.distanceKm}
-          onUpdatePendingCount={setPendingCount}
+        <SocialLeaderboardModal 
+          currentUser={user}
+          currentProfile={profile}
+          currentSteps={totalDailySteps}
+          initialTab={socialTab}
           onClose={() => setShowSocialModal(false)}
+        />
+      )}
+
+      {showAuthModal && (
+        <AuthModal 
+          onSuccess={handleAuthSuccess}
+          onClose={() => setShowAuthModal(false)}
         />
       )}
     </div>

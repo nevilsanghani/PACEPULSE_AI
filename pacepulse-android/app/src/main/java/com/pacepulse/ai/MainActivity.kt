@@ -29,7 +29,7 @@ import androidx.webkit.WebViewAssetLoader.AssetsPathHandler
 
 /**
  * PacePulse AI - Native Android Application Window
- * Integrates Persistent 24/7 Hardware Step Engine
+ * Integrates Persistent 24/7 Hardware Step Engine & Instant JS Sync Bridge
  */
 class MainActivity : ComponentActivity(), SensorEventListener {
 
@@ -42,6 +42,14 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         fun resetNativeBaseline() {
             Log.d("PacePulseBridge", "Reset native baseline called from JavaScript")
             NativeStepManager.resetBaseline(this@MainActivity)
+        }
+
+        @JavascriptInterface
+        fun requestInstantSync() {
+            Log.d("PacePulseBridge", "Instant sync requested from JavaScript")
+            runOnUiThread {
+                NativeStepManager.syncTodayStepsToWebView(this@MainActivity, webView)
+            }
         }
     }
 

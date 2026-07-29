@@ -3,6 +3,7 @@ package com.pacepulse.ai
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -17,7 +18,7 @@ import androidx.core.app.NotificationCompat
 
 /**
  * PacePulse AI - 24/7 Reliable Background Step Tracking Service
- * Listens to hardware step counter continuously without idle shutdowns
+ * Listens to hardware step counter continuously and opens MainActivity when notification is tapped
  */
 class StepTrackingService : Service(), SensorEventListener {
 
@@ -57,10 +58,21 @@ class StepTrackingService : Service(), SensorEventListener {
 
     private fun buildNotification(steps: Int): Notification {
         val text = if (steps > 0) "🚶 $steps steps today" else "Smart step tracking active"
+
+        // Intent to launch MainActivity when notification is tapped
+        val launchIntent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            this, 0, launchIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("PacePulse AI Step Tracker")
             .setContentText(text)
             .setSmallIcon(android.R.drawable.ic_menu_compass)
+            .setContentIntent(pendingIntent)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
