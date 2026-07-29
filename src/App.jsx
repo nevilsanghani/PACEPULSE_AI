@@ -337,11 +337,12 @@ export default function App() {
             currentHour={new Date().getHours()}
           />
 
-          {/* Streak & Consistency Badge Section */}
+          {/* Streak & Consistency Badge Section with Live Steps */}
           <StreakTracker 
             streakDays={streakDays}
             history={weeklyHistory}
             dailyGoal={profile.dailyGoal}
+            currentSteps={totalDailySteps}
             onOpenShareModal={() => setShowShareModal(true)}
           />
 

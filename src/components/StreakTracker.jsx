@@ -1,9 +1,13 @@
 import React from 'react';
 import { Flame, Award, Calendar, CheckCircle2, Share2, Sparkles, ShieldCheck } from 'lucide-react';
 
-export function StreakTracker({ streakDays, history, dailyGoal, onOpenShareModal }) {
-  // Days of the week (Sun-Sat)
+export function StreakTracker({ streakDays = 1, history = [], dailyGoal = 10000, currentSteps = 0, onOpenShareModal }) {
+  // Days of the week (Mon-Sun)
   const daysOfWeek = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+  // Compute live current streak including today's completion
+  const isTodayGoalHit = currentSteps >= dailyGoal && currentSteps > 0;
+  const activeStreak = isTodayGoalHit ? Math.max(streakDays, 1) : streakDays;
 
   return (
     <div className="glass-panel" style={{ padding: '28px' }}>
@@ -24,12 +28,14 @@ export function StreakTracker({ streakDays, history, dailyGoal, onOpenShareModal
           </div>
           <div>
             <h3 style={{ fontSize: '18px', fontWeight: '700' }}>Streak & Badges</h3>
-            <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Daily Goal Consistency</p>
+            <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+              {activeStreak} Day Active Streak 🔥
+            </p>
           </div>
         </div>
 
         {/* 1-Week Milestone Status */}
-        {streakDays >= 7 ? (
+        {activeStreak >= 7 ? (
           <div style={{
             background: 'linear-gradient(135deg, rgba(236, 72, 153, 0.2) 0%, rgba(255, 107, 0, 0.2) 100%)',
             border: '1px solid rgba(236, 72, 153, 0.5)',
@@ -46,7 +52,7 @@ export function StreakTracker({ streakDays, history, dailyGoal, onOpenShareModal
           </div>
         ) : (
           <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-            {7 - streakDays} days to 1-Week Badge
+            {Math.max(7 - activeStreak, 0)} days to 1-Week Badge
           </span>
         )}
       </div>
@@ -59,19 +65,21 @@ export function StreakTracker({ streakDays, history, dailyGoal, onOpenShareModal
         marginBottom: '24px'
       }}>
         {daysOfWeek.map((day, idx) => {
-          const dayData = history[idx] || { completed: false, steps: 0 };
           const isCurrentDay = idx === (new Date().getDay() + 6) % 7;
+          const dayData = history[idx] || { completed: false, steps: 0 };
+          const effectiveSteps = isCurrentDay ? currentSteps : (dayData.steps || 0);
+          const isCompleted = dayData.completed || (isCurrentDay && isTodayGoalHit);
 
           return (
             <div
               key={day}
               style={{
-                background: dayData.completed 
+                background: isCompleted 
                   ? 'linear-gradient(180deg, rgba(16, 185, 129, 0.25) 0%, rgba(16, 185, 129, 0.05) 100%)'
                   : isCurrentDay
                   ? 'rgba(0, 242, 254, 0.08)'
                   : 'rgba(255, 255, 255, 0.03)',
-                border: dayData.completed
+                border: isCompleted
                   ? '1px solid rgba(16, 185, 129, 0.5)'
                   : isCurrentDay
                   ? '1px solid rgba(0, 242, 254, 0.3)'
@@ -86,7 +94,7 @@ export function StreakTracker({ streakDays, history, dailyGoal, onOpenShareModal
                 {day}
               </span>
               <div style={{ display: 'flex', justifyContent: 'center', margin: '4px 0' }}>
-                {dayData.completed ? (
+                {isCompleted ? (
                   <CheckCircle2 size={20} color="#10B981" />
                 ) : (
                   <div style={{
@@ -97,8 +105,8 @@ export function StreakTracker({ streakDays, history, dailyGoal, onOpenShareModal
                   }} />
                 )}
               </div>
-              <span style={{ fontSize: '10px', color: dayData.completed ? '#34D399' : 'var(--text-dim)', fontWeight: '600' }}>
-                {dayData.steps > 0 ? `${(dayData.steps / 1000).toFixed(1)}k` : '0k'}
+              <span style={{ fontSize: '10px', color: isCompleted ? '#34D399' : 'var(--text-dim)', fontWeight: '600' }}>
+                {effectiveSteps > 0 ? (effectiveSteps >= 1000 ? `${(effectiveSteps / 1000).toFixed(1)}k` : `${effectiveSteps}`) : '0'}
               </span>
             </div>
           );
@@ -125,43 +133,47 @@ export function StreakTracker({ streakDays, history, dailyGoal, onOpenShareModal
           <Award size={24} color="#00F2FE" />
           <div>
             <h4 style={{ fontSize: '13px', fontWeight: '700' }}>First Step</h4>
-            <p style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Walk 1,000 steps</p>
+            <p style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Walk 100+ steps</p>
           </div>
         </div>
 
         {/* Badge 2 */}
         <div style={{
-          background: 'rgba(15, 23, 42, 0.6)',
-          border: '1px solid rgba(255, 255, 255, 0.08)',
+          background: isTodayGoalHit ? 'rgba(16, 185, 129, 0.15)' : 'rgba(15, 23, 42, 0.6)',
+          border: isTodayGoalHit ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid rgba(255, 255, 255, 0.08)',
           borderRadius: '16px',
           padding: '14px',
           display: 'flex',
           alignItems: 'center',
           gap: '10px'
         }}>
-          <ShieldCheck size={24} color="#10B981" />
+          <ShieldCheck size={24} color={isTodayGoalHit ? '#10B981' : '#64748B'} />
           <div>
-            <h4 style={{ fontSize: '13px', fontWeight: '700' }}>Goal Crusher</h4>
-            <p style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Hit daily target</p>
+            <h4 style={{ fontSize: '13px', fontWeight: '700', color: isTodayGoalHit ? '#34D399' : 'var(--text-main)' }}>
+              Goal Crusher
+            </h4>
+            <p style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+              {isTodayGoalHit ? 'Achieved Today! 🎉' : 'Hit daily target'}
+            </p>
           </div>
         </div>
 
         {/* Badge 3 (7-Day Titan) */}
         <div style={{
-          background: streakDays >= 7 
+          background: activeStreak >= 7 
             ? 'linear-gradient(135deg, rgba(255, 107, 0, 0.2) 0%, rgba(236, 72, 153, 0.2) 100%)'
             : 'rgba(15, 23, 42, 0.4)',
-          border: streakDays >= 7 ? '1px solid rgba(255, 107, 0, 0.4)' : '1px solid rgba(255, 255, 255, 0.06)',
+          border: activeStreak >= 7 ? '1px solid rgba(255, 107, 0, 0.4)' : '1px solid rgba(255, 255, 255, 0.06)',
           borderRadius: '16px',
           padding: '14px',
           display: 'flex',
           alignItems: 'center',
           gap: '10px',
-          opacity: streakDays >= 7 ? 1 : 0.5
+          opacity: activeStreak >= 7 ? 1 : 0.6
         }}>
-          <Flame size={24} color={streakDays >= 7 ? '#FF6B00' : '#64748B'} />
+          <Flame size={24} color={activeStreak >= 7 ? '#FF6B00' : '#64748B'} />
           <div>
-            <h4 style={{ fontSize: '13px', fontWeight: '700', color: streakDays >= 7 ? '#FF9E44' : 'var(--text-main)' }}>
+            <h4 style={{ fontSize: '13px', fontWeight: '700', color: activeStreak >= 7 ? '#FF9E44' : 'var(--text-main)' }}>
               7-Day Titan
             </h4>
             <p style={{ fontSize: '10px', color: 'var(--text-muted)' }}>1 Week Streak</p>
@@ -169,17 +181,15 @@ export function StreakTracker({ streakDays, history, dailyGoal, onOpenShareModal
         </div>
       </div>
 
-      {/* Share 1-Week Streak Trigger Button */}
-      {streakDays >= 7 && (
-        <button 
-          className="btn-primary" 
-          onClick={onOpenShareModal}
-          style={{ width: '100%', background: 'linear-gradient(135deg, #FF6B00 0%, #EC4899 100%)' }}
-        >
-          <Share2 size={18} />
-          Share 1-Week Streak Post to WhatsApp / Instagram
-        </button>
-      )}
+      {/* Share Streak Trigger Button */}
+      <button 
+        className="btn-primary" 
+        onClick={onOpenShareModal}
+        style={{ width: '100%', background: 'linear-gradient(135deg, #FF6B00 0%, #EC4899 100%)' }}
+      >
+        <Share2 size={18} />
+        Share Progress Story to WhatsApp / Instagram
+      </button>
     </div>
   );
 }

@@ -1,59 +1,109 @@
 import React, { useRef, useEffect, useState } from 'react';
-import { X, Share2, Download, Copy, Check, Sparkles, MessageCircle, Instagram } from 'lucide-react';
+import { X, Share2, Download, Copy, Check, Sparkles, MessageCircle, Instagram, Camera, Image as ImageIcon } from 'lucide-react';
 import { getCelebrationQuote } from '../utils/fitnessEngine';
 
-export function ShareModal({ steps, goal, streakDays, caloriesData, profile, onClose }) {
+export function ShareModal({ steps = 0, goal = 10000, streakDays = 1, caloriesData, profile, onClose }) {
   const canvasRef = useRef(null);
+  const fileInputRef = useRef(null);
   const [copied, setCopied] = useState(false);
+  const [cardMode, setCardMode] = useState('generated'); // 'generated' | 'photo'
+  const [customPhotoUrl, setCustomPhotoUrl] = useState(null);
   const [quote, setQuote] = useState(() => getCelebrationQuote(steps, goal, streakDays));
 
-  // Render Canvas Graphic Card with Perfect Layout & Font Safety
+  // Handle Photo File Upload / Camera Capture
+  const handlePhotoUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const url = URL.createObjectURL(file);
+      setCustomPhotoUrl(url);
+      setCardMode('photo');
+    }
+  };
+
+  // Render Canvas Graphic Card (Generated or Photo Overlay)
   useEffect(() => {
     const renderCanvas = () => {
       const canvas = canvasRef.current;
       if (!canvas) return;
       const ctx = canvas.getContext('2d');
 
-      // Crisp High-Resolution Canvas Dimensions (16:9 aspect ratio)
       const width = 1000;
       const height = 560;
       canvas.width = width;
       canvas.height = height;
 
-      // 1. Dark Glassmorphism Background Gradient
-      const bgGradient = ctx.createLinearGradient(0, 0, width, height);
-      bgGradient.addColorStop(0, '#070A12');
-      bgGradient.addColorStop(0.5, '#0F172A');
-      bgGradient.addColorStop(1, '#05070E');
-      ctx.fillStyle = bgGradient;
-      ctx.fillRect(0, 0, width, height);
+      if (cardMode === 'photo' && customPhotoUrl) {
+        const img = new Image();
+        img.onload = () => {
+          // Draw user photo scaled to fill canvas
+          const imgAspect = img.width / img.height;
+          const canvasAspect = width / height;
+          let drawWidth = width;
+          let drawHeight = height;
+          let offsetX = 0;
+          let offsetY = 0;
 
-      // Ambient Glow Orbs
-      const cyanGlow = ctx.createRadialGradient(180, 120, 10, 180, 120, 300);
-      cyanGlow.addColorStop(0, 'rgba(0, 242, 254, 0.22)');
-      cyanGlow.addColorStop(1, 'transparent');
-      ctx.fillStyle = cyanGlow;
-      ctx.beginPath();
-      ctx.arc(180, 120, 300, 0, Math.PI * 2);
-      ctx.fill();
+          if (imgAspect > canvasAspect) {
+            drawWidth = height * imgAspect;
+            offsetX = -(drawWidth - width) / 2;
+          } else {
+            drawHeight = width / imgAspect;
+            offsetY = -(drawHeight - height) / 2;
+          }
 
-      const purpleGlow = ctx.createRadialGradient(820, 440, 10, 820, 440, 300);
-      purpleGlow.addColorStop(0, 'rgba(139, 92, 246, 0.22)');
-      purpleGlow.addColorStop(1, 'transparent');
-      ctx.fillStyle = purpleGlow;
-      ctx.beginPath();
-      ctx.arc(820, 440, 300, 0, Math.PI * 2);
-      ctx.fill();
+          ctx.drawImage(img, offsetX, offsetY, drawWidth, drawHeight);
 
-      // Outer Border Frame
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.03)';
-      ctx.strokeStyle = 'rgba(0, 242, 254, 0.35)';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.roundRect(40, 40, width - 80, height - 80, 28);
-      ctx.fill();
-      ctx.stroke();
+          // Dark Overlay Gradient for contrast
+          const overlay = ctx.createLinearGradient(0, 0, 0, height);
+          overlay.addColorStop(0, 'rgba(4, 9, 20, 0.4)');
+          overlay.addColorStop(0.5, 'rgba(4, 9, 20, 0.2)');
+          overlay.addColorStop(1, 'rgba(4, 9, 20, 0.85)');
+          ctx.fillStyle = overlay;
+          ctx.fillRect(0, 0, width, height);
 
+          drawOverlayStats(ctx, width, height);
+        };
+        img.src = customPhotoUrl;
+      } else {
+        // 1. Dark Glassmorphism Background Gradient
+        const bgGradient = ctx.createLinearGradient(0, 0, width, height);
+        bgGradient.addColorStop(0, '#070A12');
+        bgGradient.addColorStop(0.5, '#0F172A');
+        bgGradient.addColorStop(1, '#05070E');
+        ctx.fillStyle = bgGradient;
+        ctx.fillRect(0, 0, width, height);
+
+        // Ambient Glow Orbs
+        const cyanGlow = ctx.createRadialGradient(180, 120, 10, 180, 120, 300);
+        cyanGlow.addColorStop(0, 'rgba(0, 242, 254, 0.22)');
+        cyanGlow.addColorStop(1, 'transparent');
+        ctx.fillStyle = cyanGlow;
+        ctx.beginPath();
+        ctx.arc(180, 120, 300, 0, Math.PI * 2);
+        ctx.fill();
+
+        const purpleGlow = ctx.createRadialGradient(820, 440, 10, 820, 440, 300);
+        purpleGlow.addColorStop(0, 'rgba(139, 92, 246, 0.22)');
+        purpleGlow.addColorStop(1, 'transparent');
+        ctx.fillStyle = purpleGlow;
+        ctx.beginPath();
+        ctx.arc(820, 440, 300, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Outer Border Frame
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.03)';
+        ctx.strokeStyle = 'rgba(0, 242, 254, 0.35)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.roundRect(40, 40, width - 80, height - 80, 28);
+        ctx.fill();
+        ctx.stroke();
+
+        drawOverlayStats(ctx, width, height);
+      }
+    };
+
+    const drawOverlayStats = (ctx, width, height) => {
       // 2. Header Branding
       ctx.fillStyle = '#00F2FE';
       ctx.font = 'bold 28px "Outfit", system-ui, sans-serif';
@@ -61,12 +111,12 @@ export function ShareModal({ steps, goal, streakDays, caloriesData, profile, onC
 
       ctx.fillStyle = '#94A3B8';
       ctx.font = '500 15px "Plus Jakarta Sans", system-ui, sans-serif';
-      ctx.fillText('Precision Step & Calorie Tracker Milestone', 80, 122);
+      ctx.fillText('Precision Step & Calorie Tracker Story', 80, 122);
 
       // Streak Badge (Top Right)
-      if (streakDays >= 7) {
-        ctx.fillStyle = 'rgba(255, 107, 0, 0.18)';
-        ctx.strokeStyle = 'rgba(255, 107, 0, 0.6)';
+      if (streakDays >= 1) {
+        ctx.fillStyle = 'rgba(255, 107, 0, 0.22)';
+        ctx.strokeStyle = 'rgba(255, 107, 0, 0.7)';
         ctx.lineWidth = 1.5;
         ctx.beginPath();
         ctx.roundRect(width - 270, 70, 190, 42, 21);
@@ -75,11 +125,11 @@ export function ShareModal({ steps, goal, streakDays, caloriesData, profile, onC
 
         ctx.fillStyle = '#FF9E44';
         ctx.font = 'bold 15px "Outfit", system-ui, sans-serif';
-        ctx.fillText(`🔥 1-WEEK STREAK`, width - 250, 96);
+        ctx.fillText(`🔥 ${streakDays} DAY STREAK`, width - 245, 96);
       }
 
-      // 3. Giant Step Count Section (Clean Stacked Layout)
-      ctx.fillStyle = '#64748B';
+      // 3. Giant Step Count Section
+      ctx.fillStyle = '#E2E8F0';
       ctx.font = 'bold 14px "Plus Jakarta Sans", system-ui, sans-serif';
       ctx.fillText('STEPS CONQUERED TODAY', 80, 175);
 
@@ -89,10 +139,10 @@ export function ShareModal({ steps, goal, streakDays, caloriesData, profile, onC
 
       // Goal Achievement Pill Badge
       const isGoalHit = steps >= goal;
-      ctx.fillStyle = isGoalHit ? 'rgba(16, 185, 129, 0.2)' : 'rgba(0, 242, 254, 0.15)';
-      ctx.strokeStyle = isGoalHit ? 'rgba(16, 185, 129, 0.5)' : 'rgba(0, 242, 254, 0.4)';
-      ctx.lineWidth = 1;
-      
+      ctx.fillStyle = isGoalHit ? 'rgba(16, 185, 129, 0.3)' : 'rgba(0, 242, 254, 0.2)';
+      ctx.strokeStyle = isGoalHit ? 'rgba(16, 185, 129, 0.7)' : 'rgba(0, 242, 254, 0.5)';
+      ctx.lineWidth = 1.5;
+
       const goalPillX = 80 + ctx.measureText(steps.toLocaleString()).width + 25;
       if (goalPillX < width - 300) {
         ctx.beginPath();
@@ -105,15 +155,18 @@ export function ShareModal({ steps, goal, streakDays, caloriesData, profile, onC
         ctx.fillText(isGoalHit ? '🎯 GOAL REACHED' : '⚡ IN PROGRESS', goalPillX + 15, 218);
       }
 
-      // 4. Metrics Cards Grid (3 Columns, Spacious Y)
+      // 4. Metrics Cards Grid (3 Columns)
       const metricsY = 280;
       const boxWidth = 260;
       const boxHeight = 75;
       const boxGap = 20;
 
-      // Card 1: Calories
-      ctx.fillStyle = 'rgba(255, 107, 0, 0.12)';
-      ctx.strokeStyle = 'rgba(255, 107, 0, 0.3)';
+      const totalKcal = caloriesData ? caloriesData.activeKcal || caloriesData.totalKcal : 0;
+      const distanceKm = caloriesData ? caloriesData.distanceKm : 0;
+
+      // Card 1: Active Calories
+      ctx.fillStyle = 'rgba(255, 107, 0, 0.2)';
+      ctx.strokeStyle = 'rgba(255, 107, 0, 0.4)';
       ctx.beginPath();
       ctx.roundRect(80, metricsY, boxWidth, boxHeight, 16);
       ctx.fill();
@@ -121,14 +174,14 @@ export function ShareModal({ steps, goal, streakDays, caloriesData, profile, onC
 
       ctx.fillStyle = '#FF9E44';
       ctx.font = 'bold 13px "Plus Jakarta Sans", system-ui, sans-serif';
-      ctx.fillText('🔥 CALORIES BURNED', 100, metricsY + 28);
+      ctx.fillText('🔥 ACTIVE CALORIES', 100, metricsY + 28);
       ctx.fillStyle = '#FFFFFF';
       ctx.font = '800 24px "Outfit", system-ui, sans-serif';
-      ctx.fillText(`${caloriesData.totalKcal} kcal`, 100, metricsY + 58);
+      ctx.fillText(`${totalKcal} kcal`, 100, metricsY + 58);
 
       // Card 2: Distance
-      ctx.fillStyle = 'rgba(0, 242, 254, 0.12)';
-      ctx.strokeStyle = 'rgba(0, 242, 254, 0.3)';
+      ctx.fillStyle = 'rgba(0, 242, 254, 0.2)';
+      ctx.strokeStyle = 'rgba(0, 242, 254, 0.4)';
       ctx.beginPath();
       ctx.roundRect(80 + boxWidth + boxGap, metricsY, boxWidth, boxHeight, 16);
       ctx.fill();
@@ -139,11 +192,11 @@ export function ShareModal({ steps, goal, streakDays, caloriesData, profile, onC
       ctx.fillText('📍 DISTANCE COVERED', 80 + boxWidth + boxGap + 20, metricsY + 28);
       ctx.fillStyle = '#FFFFFF';
       ctx.font = '800 24px "Outfit", system-ui, sans-serif';
-      ctx.fillText(`${caloriesData.distanceKm} km`, 80 + boxWidth + boxGap + 20, metricsY + 58);
+      ctx.fillText(`${distanceKm} km`, 80 + boxWidth + boxGap + 20, metricsY + 58);
 
       // Card 3: Daily Target
-      ctx.fillStyle = 'rgba(139, 92, 246, 0.12)';
-      ctx.strokeStyle = 'rgba(139, 92, 246, 0.3)';
+      ctx.fillStyle = 'rgba(139, 92, 246, 0.2)';
+      ctx.strokeStyle = 'rgba(139, 92, 246, 0.4)';
       ctx.beginPath();
       ctx.roundRect(80 + (boxWidth + boxGap) * 2, metricsY, boxWidth, boxHeight, 16);
       ctx.fill();
@@ -156,12 +209,12 @@ export function ShareModal({ steps, goal, streakDays, caloriesData, profile, onC
       ctx.font = '800 24px "Outfit", system-ui, sans-serif';
       ctx.fillText(`${goal.toLocaleString()} steps`, 80 + (boxWidth + boxGap) * 2 + 20, metricsY + 58);
 
-      // 5. Quote Box at Bottom (With Multiline Text Wrapping)
+      // 5. Quote Box at Bottom
       const quoteBoxY = 385;
       const quoteBoxHeight = 85;
 
-      ctx.fillStyle = 'rgba(15, 23, 42, 0.6)';
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.75)';
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
       ctx.beginPath();
       ctx.roundRect(80, quoteBoxY, width - 160, quoteBoxHeight, 18);
       ctx.fill();
@@ -170,7 +223,6 @@ export function ShareModal({ steps, goal, streakDays, caloriesData, profile, onC
       ctx.fillStyle = '#F1F5F9';
       ctx.font = 'italic 500 16px "Plus Jakarta Sans", system-ui, sans-serif';
 
-      // Helper function for multiline canvas text wrapping
       const wrapText = (text, x, y, maxWidth, lineHeight) => {
         const words = text.split(' ');
         let line = '';
@@ -193,22 +245,28 @@ export function ShareModal({ steps, goal, streakDays, caloriesData, profile, onC
       wrapText(`"${quote}"`, 105, quoteBoxY + 36, width - 210, 24);
     };
 
-    // Ensure fonts are loaded before drawing on canvas
     if (document.fonts) {
-      document.fonts.ready.then(() => {
-        renderCanvas();
-      });
+      document.fonts.ready.then(() => renderCanvas());
     } else {
       renderCanvas();
     }
-  }, [steps, goal, streakDays, caloriesData, quote]);
+  }, [steps, goal, streakDays, caloriesData, quote, cardMode, customPhotoUrl]);
 
-  // Handle WhatsApp Direct Share
+  // Handle WhatsApp Direct Share (Story or Chat)
   const handleWhatsAppShare = () => {
+    handleDownloadCard();
     const text = encodeURIComponent(
-      `🏃 *PacePulse AI Fitness Update* 🏃\n\n${quote}\n\n📊 *Daily Stats:*\n• Steps: ${steps.toLocaleString()}\n• Calories: ${caloriesData.totalKcal} kcal\n• Distance: ${caloriesData.distanceKm} km\n• Streak: ${streakDays} days 🔥\n\nTracked with PacePulse AI! ⚡`
+      `🏃 *PacePulse AI Fitness Update* 🏃\n\n${quote}\n\n📊 *Daily Stats:*\n• Steps: ${steps.toLocaleString()}\n• Active Calories: ${caloriesData ? caloriesData.activeKcal : 0} kcal\n• Distance: ${caloriesData ? caloriesData.distanceKm : 0} km\n• Streak: ${streakDays} days 🔥\n\nTracked with PacePulse AI! ⚡`
     );
-    window.open(`https://wa.me/?text=${text}`, '_blank');
+    window.open(`https://api.whatsapp.com/send?text=${text}`, '_blank');
+  };
+
+  // Handle Instagram Stories Direct Share
+  const handleInstagramShare = () => {
+    handleDownloadCard();
+    handleCopyCaption();
+    alert("Image card downloaded & caption copied! Opening Instagram...");
+    window.open(`https://www.instagram.com/`, '_blank');
   };
 
   // Download High-Res PNG Card
@@ -222,7 +280,9 @@ export function ShareModal({ steps, goal, streakDays, caloriesData, profile, onC
   };
 
   const handleCopyCaption = () => {
-    const fullCaption = `${quote}\n\nSteps: ${steps.toLocaleString()} | Calories: ${caloriesData.totalKcal} kcal | Distance: ${caloriesData.distanceKm} km | ${streakDays} Day Streak 🔥\n#PacePulseAI #FitnessGoal #StepTracker #WalkingStreak`;
+    const activeKcal = caloriesData ? caloriesData.activeKcal : 0;
+    const distKm = caloriesData ? caloriesData.distanceKm : 0;
+    const fullCaption = `${quote}\n\nSteps: ${steps.toLocaleString()} | Active Calories: ${activeKcal} kcal | Distance: ${distKm} km | ${streakDays} Day Streak 🔥\n#PacePulseAI #FitnessGoal #StepTracker #WalkingStreak`;
     navigator.clipboard.writeText(fullCaption);
     setCopied(true);
     setTimeout(() => setCopied(false), 2500);
@@ -248,108 +308,175 @@ export function ShareModal({ steps, goal, streakDays, caloriesData, profile, onC
         maxWidth: '880px',
         maxHeight: '90vh',
         overflowY: 'auto',
-        padding: '32px',
-        position: 'relative'
+        borderRadius: '24px',
+        padding: '28px',
+        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)'
       }}>
-        {/* Close Button */}
-        <button 
-          onClick={onClose}
-          style={{
-            position: 'absolute',
-            top: '20px',
-            right: '20px',
-            background: 'none',
-            border: 'none',
-            color: 'var(--text-muted)',
-            cursor: 'pointer'
-          }}
-        >
-          <X size={22} />
-        </button>
-
-        {/* Title Header */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px' }}>
-          <div style={{
-            width: '42px',
-            height: '42px',
-            borderRadius: '12px',
-            background: 'linear-gradient(135deg, #25D366 0%, #00F2FE 100%)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center'
-          }}>
-            <Share2 size={22} color="#040914" />
-          </div>
+        {/* Modal Header */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
           <div>
-            <h2 style={{ fontSize: '22px', fontWeight: '800' }}>Social Media Post Creator</h2>
+            <h2 style={{ fontSize: '20px', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Sparkles size={22} color="#00F2FE" /> Post Progress Story
+            </h2>
             <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-              Share your step goal achievement & streak on WhatsApp or Instagram
+              Share your step milestone to WhatsApp Status & Instagram Stories
             </p>
           </div>
+          <button
+            onClick={onClose}
+            style={{
+              background: 'rgba(255, 255, 255, 0.08)',
+              border: 'none',
+              color: 'var(--text-muted)',
+              borderRadius: '50%',
+              width: '32px',
+              height: '32px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+          >
+            <X size={18} />
+          </button>
         </div>
 
-        {/* Canvas Graphic Preview Card */}
+        {/* Story Card Image Source Selection (Generated vs Camera Photo) */}
+        <div style={{
+          display: 'flex',
+          gap: '10px',
+          marginBottom: '20px',
+          background: 'rgba(255, 255, 255, 0.05)',
+          padding: '4px',
+          borderRadius: '16px'
+        }}>
+          <button
+            onClick={() => setCardMode('generated')}
+            style={{
+              flex: 1,
+              padding: '10px',
+              borderRadius: '12px',
+              border: 'none',
+              background: cardMode === 'generated' ? 'rgba(0, 242, 254, 0.2)' : 'transparent',
+              color: cardMode === 'generated' ? '#00F2FE' : 'var(--text-muted)',
+              fontWeight: '700',
+              fontSize: '13px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '8px'
+            }}
+          >
+            <ImageIcon size={16} /> PacePulse Card
+          </button>
+          
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            style={{
+              flex: 1,
+              padding: '10px',
+              borderRadius: '12px',
+              border: 'none',
+              background: cardMode === 'photo' ? 'rgba(236, 72, 153, 0.2)' : 'transparent',
+              color: cardMode === 'photo' ? '#EC4899' : 'var(--text-muted)',
+              fontWeight: '700',
+              fontSize: '13px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '8px'
+            }}
+          >
+            <Camera size={16} /> Take Photo / Upload Camera Image
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            style={{ display: 'none' }}
+            onChange={handlePhotoUpload}
+          />
+        </div>
+
+        {/* Live Canvas Preview */}
         <div style={{
           width: '100%',
-          overflowX: 'auto',
           borderRadius: '18px',
-          border: '1px solid rgba(0, 242, 254, 0.25)',
-          marginBottom: '24px',
-          background: '#070A12',
-          boxShadow: '0 10px 30px rgba(0, 0, 0, 0.5)'
+          overflow: 'hidden',
+          border: '1px solid rgba(255, 255, 255, 0.1)',
+          marginBottom: '20px',
+          boxShadow: '0 10px 30px rgba(0, 0, 0, 0.4)'
         }}>
-          <canvas ref={canvasRef} style={{ width: '100%', height: 'auto', display: 'block' }} />
+          <canvas
+            ref={canvasRef}
+            style={{ width: '100%', height: 'auto', display: 'block' }}
+          />
         </div>
 
-        {/* Customizable Line/Quote Selector */}
-        <div style={{ marginBottom: '24px' }}>
-          <label style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-muted)', display: 'block', marginBottom: '8px' }}>
-            Celebration Line / Status Text
-          </label>
-          <div style={{ display: 'flex', gap: '10px' }}>
-            <input 
-              type="text"
-              className="glass-input"
-              value={quote}
-              onChange={(e) => setQuote(e.target.value)}
-            />
-            <button 
-              className="btn-secondary"
-              onClick={() => setQuote(getCelebrationQuote(steps, goal, streakDays))}
-              title="Regenerate AI Quote"
-            >
-              <Sparkles size={18} color="#F59E0B" />
-            </button>
-          </div>
+        {/* Social Share Buttons */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
+          <button
+            onClick={handleWhatsAppShare}
+            style={{
+              background: 'linear-gradient(135deg, #25D366 0%, #128C7E 100%)',
+              color: '#FFFFFF',
+              border: 'none',
+              borderRadius: '14px',
+              padding: '14px',
+              fontSize: '14px',
+              fontWeight: '700',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '8px'
+            }}
+          >
+            <MessageCircle size={18} /> Post to WhatsApp Status
+          </button>
+
+          <button
+            onClick={handleInstagramShare}
+            style={{
+              background: 'linear-gradient(135deg, #E1306C 0%, #C13584 50%, #833AB4 100%)',
+              color: '#FFFFFF',
+              border: 'none',
+              borderRadius: '14px',
+              padding: '14px',
+              fontSize: '14px',
+              fontWeight: '700',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '8px'
+            }}
+          >
+            <Instagram size={18} /> Share to Instagram Stories
+          </button>
         </div>
 
-        {/* Action Share Buttons Row */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '14px' }}>
-          {/* WhatsApp Direct Share Button */}
-          <button className="btn-whatsapp" onClick={handleWhatsAppShare}>
-            <MessageCircle size={20} />
-            Post to WhatsApp
+        {/* Secondary Action Buttons (Download & Copy Caption) */}
+        <div style={{ display: 'flex', gap: '12px' }}>
+          <button
+            onClick={handleDownloadCard}
+            className="btn-secondary"
+            style={{ flex: 1, padding: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+          >
+            <Download size={16} /> Save Image Card
           </button>
-
-          {/* Instagram / Story Card Generator Button */}
-          <button className="btn-instagram" onClick={() => { handleDownloadCard(); handleCopyCaption(); }}>
-            <Instagram size={20} />
-            Instagram Story Card
-          </button>
-
-          {/* Download Graphic Image Card */}
-          <button className="btn-secondary" onClick={handleDownloadCard} style={{ background: 'rgba(255, 255, 255, 0.08)' }}>
-            <Download size={18} color="#00F2FE" />
-            Download PNG Card
+          <button
+            onClick={handleCopyCaption}
+            className="btn-secondary"
+            style={{ flex: 1, padding: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+          >
+            {copied ? <Check size={16} color="#10B981" /> : <Copy size={16} />}
+            {copied ? 'Caption Copied!' : 'Copy Caption Text'}
           </button>
         </div>
-
-        {/* Copy Status Notification */}
-        {copied && (
-          <p style={{ marginTop: '12px', textAlign: 'center', color: '#34D399', fontSize: '13px', fontWeight: '600' }}>
-            ✓ Caption copied to clipboard & Image card downloaded! Open Instagram to paste post!
-          </p>
-        )}
       </div>
     </div>
   );
