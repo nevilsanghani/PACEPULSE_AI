@@ -1,41 +1,74 @@
 import React from 'react';
-import { Flame, Footprints, Navigation, Clock, Share2, RotateCcw, Trophy } from 'lucide-react';
+import { Footprints, Flame, Navigation, Clock, RefreshCw, Share2, Trophy } from 'lucide-react';
 
 export function StepRing({ 
-  steps, 
-  goal, 
+  steps = 0, 
+  goal = 10000, 
   caloriesData, 
   onOpenResetModal, 
   onOpenShareModal,
-  isGoalReached 
+  isGoalReached = false
 }) {
-  const percentage = Math.min(100, Math.round((steps / goal) * 100));
-
-  // SVG Gauge calculations
-  const size = 280;
-  const strokeWidth = 20;
+  const percentage = Math.min(Math.round((steps / goal) * 100), 100);
+  const size = 260;
+  const strokeWidth = 16;
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
   const strokeDashoffset = circumference - (percentage / 100) * circumference;
 
-  const bmrDisplay = caloriesData && typeof caloriesData.bmrDaily === 'number'
-    ? caloriesData.bmrDaily
-    : 1669;
+  const bmrDisplay = (caloriesData && typeof caloriesData.bmrDaily === 'number') ? caloriesData.bmrDaily : 1669;
 
   return (
-    <div className="glass-panel" style={{ padding: '36px', textAlign: 'center', position: 'relative', overflow: 'hidden' }}>
-      {/* Background ambient glow */}
+    <div className="glass-card main-ring-card" style={{
+      position: 'relative',
+      overflow: 'hidden',
+      padding: '32px 24px',
+      borderRadius: '28px',
+      background: 'rgba(10, 15, 26, 0.75)',
+      border: '1px solid rgba(255, 255, 255, 0.08)',
+      textAlign: 'center'
+    }}>
+      {/* Top Action Buttons (Reset & Share) */}
       <div style={{
-        position: 'absolute',
-        top: '-40%',
-        left: '50%',
-        transform: 'translateX(-50%)',
-        width: '300px',
-        height: '300px',
-        background: 'radial-gradient(circle, rgba(0, 242, 254, 0.15) 0%, transparent 70%)',
-        pointerEvents: 'none',
-        borderRadius: '50%'
-      }} />
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: '20px'
+      }}>
+        <button
+          onClick={onOpenResetModal}
+          className="btn-secondary"
+          style={{
+            padding: '8px 14px',
+            fontSize: '12px',
+            borderRadius: '12px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            color: '#F87171',
+            borderColor: 'rgba(248, 113, 113, 0.3)'
+          }}
+          title="Reset Daily Steps Baseline"
+        >
+          <RefreshCw size={14} /> Reset Steps
+        </button>
+
+        <button
+          onClick={onOpenShareModal}
+          className="btn-primary"
+          style={{
+            padding: '8px 16px',
+            fontSize: '12px',
+            borderRadius: '12px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px'
+          }}
+          title="Share Daily Progress"
+        >
+          <Share2 size={14} /> Share Card
+        </button>
+      </div>
 
       {/* Goal Reached Celebration Banner */}
       {isGoalReached && (
@@ -51,7 +84,7 @@ export function StepRing({
         }}>
           <Trophy size={20} color="#10B981" />
           <span style={{ fontSize: '14px', fontWeight: '700', color: '#34D399' }}>
-            Goal Achieved! You walked {steps.toLocaleString()} steps today! 🎉
+            Goal Achieved! You walked {(steps || 0).toLocaleString()} steps today! 🎉
           </span>
         </div>
       )}
@@ -108,10 +141,10 @@ export function StepRing({
         }}>
           <Footprints size={28} color="#00F2FE" style={{ marginBottom: '6px' }} />
           <h2 style={{ fontSize: '42px', fontWeight: '900', lineHeight: 1, letterSpacing: '-1px' }}>
-            {steps.toLocaleString()}
+            {(steps || 0).toLocaleString()}
           </h2>
           <p style={{ fontSize: '13px', color: 'var(--text-muted)', fontWeight: '600', marginTop: '4px' }}>
-            / {goal.toLocaleString()} Steps Goal
+            / {(goal || 10000).toLocaleString()} Steps Goal
           </p>
           <div style={{
             marginTop: '8px',
@@ -148,14 +181,14 @@ export function StepRing({
         </span>
       </div>
 
-      {/* PREVIOUS SLEEK 3-COLUMN METRICS UI DESIGN (Calories, Distance, Active Time) */}
+      {/* PREVIOUS SLEEK 3-COLUMN METRICS UI DESIGN (Active Calories, Distance, Active Time) */}
       <div className="metrics-cards-grid" style={{
         display: 'grid',
         gridTemplateColumns: 'repeat(3, 1fr)',
         gap: '16px',
         marginBottom: '28px'
       }}>
-        {/* Calories Card */}
+        {/* Active Calories Card */}
         <div style={{
           background: 'rgba(255, 107, 0, 0.08)',
           border: '1px solid rgba(255, 107, 0, 0.2)',
@@ -166,12 +199,12 @@ export function StepRing({
         }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', marginBottom: '6px' }}>
             <Flame size={18} color="#FF6B00" />
-            <span style={{ fontSize: '12px', color: '#FF9E44', fontWeight: '700', letterSpacing: '0.2px' }}>Total Calories</span>
+            <span style={{ fontSize: '12px', color: '#FF9E44', fontWeight: '700', letterSpacing: '0.2px' }}>Active Calories</span>
           </div>
           <p style={{ fontSize: '22px', fontWeight: '900', color: 'var(--text-main)', margin: '2px 0' }}>
-            {caloriesData ? caloriesData.totalKcal : 0} <span style={{ fontSize: '12px', fontWeight: '500', color: 'var(--text-muted)' }}>kcal</span>
+            {caloriesData ? caloriesData.activeKcal : 0} <span style={{ fontSize: '12px', fontWeight: '500', color: 'var(--text-muted)' }}>kcal</span>
           </p>
-          <span style={{ fontSize: '10px', color: 'var(--text-dim)', fontWeight: '500' }}>Active + BMR Energy</span>
+          <span style={{ fontSize: '10px', color: 'var(--text-dim)', fontWeight: '500' }}>Movement energy only</span>
         </div>
 
         {/* Distance Card */}
@@ -209,25 +242,8 @@ export function StepRing({
           <p style={{ fontSize: '22px', fontWeight: '900', color: 'var(--text-main)', margin: '2px 0' }}>
             {caloriesData ? caloriesData.durationMins : 0} <span style={{ fontSize: '12px', fontWeight: '500', color: 'var(--text-muted)' }}>mins</span>
           </p>
-          <span style={{ fontSize: '10px', color: 'var(--text-dim)', fontWeight: '500' }}>Walk duration</span>
+          <span style={{ fontSize: '10px', color: 'var(--text-dim)', fontWeight: '500' }}>Estimated walk time</span>
         </div>
-      </div>
-
-      {/* Control Buttons & Social Share Action */}
-      <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', flexWrap: 'wrap' }}>
-        <button className="btn-primary" onClick={onOpenShareModal}>
-          <Share2 size={18} />
-          Share Status to WhatsApp / Instagram
-        </button>
-
-        <button 
-          className="btn-secondary" 
-          onClick={onOpenResetModal}
-          style={{ borderColor: 'rgba(239, 68, 68, 0.3)', color: '#F87171' }}
-          title="Reset today's steps and clear streak"
-        >
-          <RotateCcw size={16} color="#F87171" /> Reset Steps & Streak
-        </button>
       </div>
     </div>
   );
