@@ -19,7 +19,7 @@ import androidx.core.app.NotificationCompat
 
 /**
  * PacePulse AI - Battery Smart Background Step Tracking Service
- * Delegates step counting to NativeStepManager singleton
+ * Delegates step counting to NativeStepManager singleton with persistent SharedPreferences context
  */
 class StepTrackingService : Service(), SensorEventListener {
 
@@ -82,7 +82,7 @@ class StepTrackingService : Service(), SensorEventListener {
         resetIdleTimer()
 
         if (event.sensor.type == Sensor.TYPE_STEP_COUNTER) {
-            NativeStepManager.processCumulativeStep(event.values[0], null)
+            NativeStepManager.processCumulativeStep(this, event.values[0], null)
         } else if (event.sensor.type == Sensor.TYPE_STEP_DETECTOR) {
             NativeStepManager.processSingleStepDetectorEvent(null)
         }

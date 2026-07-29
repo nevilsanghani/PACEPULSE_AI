@@ -66,6 +66,12 @@ export default function App() {
   // Audio Coach Mute Toggle State
   const [isMuted, setIsMuted] = useState(false);
 
+  // Pending Friend Requests Count
+  const [pendingCount, setPendingCount] = useState(() => {
+    const saved = localStorage.getItem('pacepulse_pending_requests');
+    return saved ? JSON.parse(saved).length : 0;
+  });
+
   // Streak & History State
   const [streakDays, setStreakDays] = useState(() => {
     const key = user ? getUserKey('pacepulse_streak', user) : 'pacepulse_streak_guest';
@@ -320,9 +326,11 @@ export default function App() {
       <Navbar
         user={user}
         streakDays={streakDays}
+        pendingCount={pendingCount}
         onOpenAuthModal={() => setShowAuthModal(true)}
         onSignOut={handleSignOut}
         onOpenProfile={() => setShowProfileModal(true)}
+        onOpenSocial={() => setShowSocialModal(true)}
       />
 
       {/* Action Bar for Social Connections, Audio Coach & History */}
@@ -507,6 +515,7 @@ export default function App() {
           userSteps={totalDailySteps}
           activeKcal={caloriesData.activeKcal}
           distanceKm={caloriesData.distanceKm}
+          onUpdatePendingCount={setPendingCount}
           onClose={() => setShowSocialModal(false)}
         />
       )}

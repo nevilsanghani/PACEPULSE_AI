@@ -30,7 +30,7 @@ import kotlin.math.sqrt
 
 /**
  * PacePulse AI - Native Android Application Window
- * Integrates JavascriptInterface bridge for instant step resetting and NativeStepManager
+ * Integrates Persistent Google Fit Style Step Engine & Vehicle Motion Filtering
  */
 class MainActivity : ComponentActivity(), SensorEventListener {
 
@@ -53,7 +53,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         @JavascriptInterface
         fun resetNativeBaseline() {
             Log.d("PacePulseBridge", "Reset native baseline called from JavaScript")
-            NativeStepManager.resetBaseline()
+            NativeStepManager.resetBaseline(this@MainActivity)
         }
     }
 
@@ -94,7 +94,6 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
             settings.cacheMode = WebSettings.LOAD_DEFAULT
 
-            // Expose native reset baseline function to JavaScript
             addJavascriptInterface(AndroidStepBridge(), "AndroidStepBridge")
 
             webViewClient = object : WebViewClient() {
@@ -155,7 +154,6 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
         }
 
-        // Flush any background steps accumulated while screen was turned off
         NativeStepManager.flushPendingBackgroundSteps(webView)
     }
 
@@ -173,7 +171,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
 
         // Primary: Cumulative Hardware Step Counter
         if (event.sensor.type == Sensor.TYPE_STEP_COUNTER) {
-            NativeStepManager.processCumulativeStep(event.values[0], webView)
+            NativeStepManager.processCumulativeStep(this, event.values[0], webView)
             return
         }
 
@@ -183,7 +181,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             return
         }
 
-        // Fallback: Accelerometer Filter (Only if no hardware step sensors present)
+        // Fallback Accelerometer (with Vehicle Vibration Filter)
         if (event.sensor.type == Sensor.TYPE_ACCELEROMETER && stepCounterSensor == null && stepDetectorSensor == null) {
             val rawX = event.values[0]
             val rawY = event.values[1]
@@ -208,7 +206,8 @@ class MainActivity : ComponentActivity(), SensorEventListener {
 
             val now = System.currentTimeMillis()
 
-            if (smoothedMag > 0.65f && (now - lastStepTime) >= 150L && (now - lastStepTime) <= 1800L) {
+            // Vehicle Vibration Filter: Rejects high frequency bumps (<185ms) & extreme forces (>6.5 m/s²)
+            if (smoothedMag in 0.65f..6.5f && (now - lastStepTime) >= 185L && (now - lastStepTime) <= 1800L) {
                 lastStepTime = now
                 NativeStepManager.processSingleStepDetectorEvent(webView)
             }
