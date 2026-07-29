@@ -24,9 +24,18 @@ export function ProfileModal({ profile, onSave, onClose }) {
   const [weightLbsInput, setWeightLbsInput] = useState(String(Math.round((profile.weightKg || 70) * 2.20462 * 10) / 10));
 
   const [dailyGoalInput, setDailyGoalInput] = useState(String(profile.dailyGoal || 10000));
+  const [widgetStyle, setWidgetStyle] = useState(profile.widgetStyle || 'solid');
 
   // Calculate live user age from Birth Date
   const computedAge = calculateAgeFromBirthDate(birthDate);
+
+  // Widget Style Handler
+  const handleWidgetStyleChange = (newStyle) => {
+    setWidgetStyle(newStyle);
+    if (window.AndroidStepBridge && window.AndroidStepBridge.setWidgetStyle) {
+      window.AndroidStepBridge.setWidgetStyle(newStyle);
+    }
+  };
 
   // Unit conversion handlers
   const handleHeightUnitToggle = (newUnit) => {
@@ -117,6 +126,7 @@ export function ProfileModal({ profile, onSave, onClose }) {
       strideCm: liveStride,
       heightUnit,
       weightUnit,
+      widgetStyle,
       useAutoStride: true
     };
     onSave(updatedProfile);
@@ -150,10 +160,10 @@ export function ProfileModal({ profile, onSave, onClose }) {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
           <div>
             <h2 style={{ fontSize: '20px', fontWeight: '800', margin: 0 }}>
-              Physiology & Fitness Profile
+              Physiology & Preferences
             </h2>
             <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '2px 0 0' }}>
-              Calibrates stride length, BMR & active calorie burn
+              Calibrates stride length, BMR & Widget Style
             </p>
           </div>
           <button
@@ -214,7 +224,7 @@ export function ProfileModal({ profile, onSave, onClose }) {
             </div>
           </div>
 
-          {/* Birth Date Picker (Replaces static age) */}
+          {/* Birth Date Picker */}
           <div style={{ marginBottom: '18px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
               <label style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-muted)' }}>
@@ -233,13 +243,12 @@ export function ProfileModal({ profile, onSave, onClose }) {
             />
           </div>
 
-          {/* Height Row with Unit Toggle (cm / ft+in) */}
+          {/* Height Row with Unit Toggle */}
           <div style={{ marginBottom: '18px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
               <label style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-muted)' }}>
                 Height
               </label>
-              {/* Unit Toggle Buttons */}
               <div style={{ display: 'flex', gap: '4px', background: 'rgba(255, 255, 255, 0.06)', borderRadius: '8px', padding: '2px' }}>
                 <button
                   type="button"
@@ -310,13 +319,12 @@ export function ProfileModal({ profile, onSave, onClose }) {
             )}
           </div>
 
-          {/* Weight Row with Unit Toggle (kg / lbs) */}
+          {/* Weight Row with Unit Toggle */}
           <div style={{ marginBottom: '18px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
               <label style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-muted)' }}>
                 Weight
               </label>
-              {/* Unit Toggle Buttons */}
               <div style={{ display: 'flex', gap: '4px', background: 'rgba(255, 255, 255, 0.06)', borderRadius: '8px', padding: '2px' }}>
                 <button
                   type="button"
@@ -375,7 +383,7 @@ export function ProfileModal({ profile, onSave, onClose }) {
           </div>
 
           {/* Daily Step Goal Input */}
-          <div style={{ marginBottom: '20px' }}>
+          <div style={{ marginBottom: '18px' }}>
             <label style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-muted)', display: 'block', marginBottom: '6px' }}>
               Daily Step Goal
             </label>
@@ -388,6 +396,47 @@ export function ProfileModal({ profile, onSave, onClose }) {
               value={dailyGoalInput}
               onChange={(e) => setDailyGoalInput(e.target.value)}
             />
+          </div>
+
+          {/* Android Home Screen Widget Theme Preference */}
+          <div style={{ marginBottom: '20px' }}>
+            <label style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-muted)', display: 'block', marginBottom: '6px' }}>
+              Android Home Screen Widget Style
+            </label>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+              <button
+                type="button"
+                onClick={() => handleWidgetStyleChange('solid')}
+                style={{
+                  border: `1.5px solid ${widgetStyle === 'solid' ? '#00F2FE' : 'rgba(255, 255, 255, 0.1)'}`,
+                  background: widgetStyle === 'solid' ? 'rgba(0, 242, 254, 0.12)' : 'rgba(255, 255, 255, 0.03)',
+                  color: widgetStyle === 'solid' ? '#00F2FE' : 'var(--text-muted)',
+                  fontWeight: '700',
+                  fontSize: '12px',
+                  padding: '10px',
+                  borderRadius: '12px',
+                  cursor: 'pointer'
+                }}
+              >
+                🌙 Solid Cyber Dark
+              </button>
+              <button
+                type="button"
+                onClick={() => handleWidgetStyleChange('transparent')}
+                style={{
+                  border: `1.5px solid ${widgetStyle === 'transparent' ? '#38BDF8' : 'rgba(255, 255, 255, 0.1)'}`,
+                  background: widgetStyle === 'transparent' ? 'rgba(56, 189, 248, 0.12)' : 'rgba(255, 255, 255, 0.03)',
+                  color: widgetStyle === 'transparent' ? '#38BDF8' : 'var(--text-muted)',
+                  fontWeight: '700',
+                  fontSize: '12px',
+                  padding: '10px',
+                  borderRadius: '12px',
+                  cursor: 'pointer'
+                }}
+              >
+                💎 Glass Transparent
+              </button>
+            </div>
           </div>
 
           {/* Live Calibrated Metrics Preview Box */}

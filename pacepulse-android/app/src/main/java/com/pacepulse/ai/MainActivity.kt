@@ -51,6 +51,14 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                 NativeStepManager.syncTodayStepsToWebView(this@MainActivity, webView)
             }
         }
+
+        @JavascriptInterface
+        fun setWidgetStyle(style: String) {
+            Log.d("PacePulseBridge", "Set widget style called: $style")
+            runOnUiThread {
+                PacePulseWidget.setWidgetStyle(this@MainActivity, style)
+            }
+        }
     }
 
     @SuppressLint("SetJavaScriptEnabled")
