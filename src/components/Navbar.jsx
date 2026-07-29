@@ -1,15 +1,20 @@
 import React from 'react';
-import { Flame, Activity, User, LogIn, LogOut, Bell } from 'lucide-react';
+import { Flame, Activity, Bell, Trophy } from 'lucide-react';
 
 export function Navbar({ 
   user,
-  streakDays, 
+  streakDays = 0, 
   pendingCount = 0,
+  hasUnreadDot = false,
+  onOpenAuth,
   onOpenAuthModal,
   onSignOut,
   onOpenProfile,
-  onOpenSocial
+  onOpenSocial,
+  onOpenNotifications
 }) {
+  const handleAuth = onOpenAuth || onOpenAuthModal;
+
   return (
     <header className="nav-header">
       {/* Brand Logo */}
@@ -28,10 +33,33 @@ export function Navbar({
       </div>
 
       {/* Right User Action & Notification Cluster */}
-      <div className="nav-action-group">
-        {/* Notification Bell Icon for Pending Friend Requests */}
+      <div className="nav-action-group" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        
+        {/* Dedicated Social Leaderboard & Connection Button */}
         <button
-          onClick={onOpenSocial}
+          onClick={() => onOpenSocial && onOpenSocial('leaderboard')}
+          style={{
+            background: 'rgba(0, 242, 254, 0.12)',
+            border: '1px solid rgba(0, 242, 254, 0.35)',
+            color: '#00F2FE',
+            borderRadius: '14px',
+            padding: '8px 14px',
+            fontSize: '12px',
+            fontWeight: '700',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px'
+          }}
+          title="Social Leaderboard & Make Connections"
+        >
+          <Trophy size={16} color="#00F2FE" />
+          <span>Leaderboard & Friends</span>
+        </button>
+
+        {/* Notification Bell Icon with Red Dot (Disappears once opened!) */}
+        <button
+          onClick={() => onOpenNotifications && onOpenNotifications()}
           style={{
             position: 'relative',
             background: 'rgba(255, 255, 255, 0.06)',
@@ -44,27 +72,28 @@ export function Navbar({
             justifyContent: 'center',
             cursor: 'pointer'
           }}
-          title="Connection Requests & Notifications"
+          title="Notifications & System Alerts"
         >
           <Bell size={18} color="#60a5fa" />
-          {pendingCount > 0 && (
+          {hasUnreadDot && (
             <span style={{
               position: 'absolute',
-              top: '-4px',
-              right: '-4px',
-              background: '#ef4444',
+              top: '-2px',
+              right: '-2px',
+              background: 'linear-gradient(135deg, #FF3B30 0%, #EF4444 100%)',
               color: 'white',
-              fontSize: '11px',
-              fontWeight: 800,
+              fontSize: '10px',
+              fontWeight: 900,
               borderRadius: '50%',
-              width: '18px',
-              height: '18px',
+              width: '14px',
+              height: '14px',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              border: '2px solid #040914'
+              border: '2px solid #040914',
+              boxShadow: '0 0 10px rgba(239, 68, 68, 0.9)'
             }}>
-              {pendingCount}
+              {pendingCount > 0 ? pendingCount : ''}
             </span>
           )}
         </button>
@@ -82,29 +111,56 @@ export function Navbar({
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <button 
               onClick={onOpenProfile}
-              className="btn-secondary nav-user-btn"
-              title="Edit Profile & Fitness Goals"
+              className="btn-secondary"
+              style={{
+                borderRadius: '12px',
+                padding: '8px 12px',
+                fontSize: '13px',
+                fontWeight: '600',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
             >
-              <User size={15} color="#00F2FE" />
-              <span className="nav-user-name">{user.displayName || 'Profile'}</span>
+              <div style={{
+                width: '8px',
+                height: '8px',
+                borderRadius: '50%',
+                background: '#10B981',
+                boxShadow: '0 0 8px #10B981'
+              }} />
+              <span>{user.displayName || user.profile?.name || 'Account'}</span>
             </button>
-
-            <button 
+            
+            <button
               onClick={onSignOut}
-              className="btn-secondary nav-logout-btn"
+              className="btn-secondary"
+              style={{
+                borderRadius: '12px',
+                padding: '8px',
+                fontSize: '12px',
+                color: 'var(--text-muted)'
+              }}
               title="Sign Out"
             >
-              <LogOut size={15} color="#F87171" />
+              Sign Out
             </button>
           </div>
         ) : (
           <button 
-            onClick={onOpenAuthModal}
-            className="btn-primary nav-login-btn"
+            onClick={handleAuth}
+            className="btn-primary"
+            style={{
+              borderRadius: '12px',
+              padding: '8px 16px',
+              fontSize: '13px',
+              fontWeight: '700'
+            }}
           >
-            <LogIn size={15} /> Sign In
+            Sign In
           </button>
         )}
+
       </div>
     </header>
   );

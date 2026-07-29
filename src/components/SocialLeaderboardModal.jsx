@@ -1,40 +1,58 @@
 import React, { useState, useEffect } from 'react';
-import { validateUserExistsInDb } from '../firebase';
+import { 
+  validateUserExistsInDb, 
+  sendFriendRequestInDb, 
+  getPendingRequestsFromDb, 
+  getOutgoingRequestsFromDb, 
+  acceptFriendRequestInDb, 
+  declineFriendRequestInDb, 
+  cancelOutgoingRequestInDb, 
+  getFriendsListFromDb, 
+  removeFriendInDb 
+} from '../firebase';
 
-export function SocialLeaderboardModal({ user, userSteps, activeKcal, distanceKm, onClose, onUpdatePendingCount }) {
-  const [activeTab, setActiveTab] = useState('leaderboard'); // 'leaderboard' | 'friends' | 'instagram'
+export function SocialLeaderboardModal({ 
+  currentUser, 
+  currentProfile, 
+  currentSteps = 0, 
+  initialTab = 'leaderboard', 
+  onClose, 
+  onUpdatePendingCount 
+}) {
+  const [activeTab, setActiveTab] = useState(initialTab || 'leaderboard'); 
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [instaHandle, setInstaHandle] = useState(() => {
     return localStorage.getItem('pacepulse_insta_handle') || '';
   });
 
+  const myUid = currentUser?.uid || 'guest';
+
+  // Connected Friends List for Current Active User
   const [friendsList, setFriendsList] = useState(() => {
-    const saved = localStorage.getItem('pacepulse_friends_list');
-    return saved ? JSON.parse(saved) : [];
+    return getFriendsListFromDb(myUid);
   });
 
-  // Incoming requests sent TO me
-  const [pendingRequests, setPendingRequests] = useState(() => {
-    const saved = localStorage.getItem('pacepulse_pending_requests');
-    return saved ? JSON.parse(saved) : [];
-  });
+  // Incoming Requests sent TO Current Active User
+  const [pendingRequests, setPendingRequests] = useState([]);
 
-  // Outgoing requests sent BY me
+  // Outgoing Requests sent BY Current Active User
   const [outgoingRequests, setOutgoingRequests] = useState(() => {
-    const saved = localStorage.getItem('pacepulse_outgoing_requests');
-    return saved ? JSON.parse(saved) : [];
+    return getOutgoingRequestsFromDb(myUid);
   });
 
-  // Sync state to local storage and update pending badge
+  // Fetch fresh pending requests on load & sync badge
   useEffect(() => {
-    localStorage.setItem('pacepulse_friends_list', JSON.stringify(friendsList));
-    localStorage.setItem('pacepulse_pending_requests', JSON.stringify(pendingRequests));
-    localStorage.setItem('pacepulse_outgoing_requests', JSON.stringify(outgoingRequests));
-    if (onUpdatePendingCount) {
-      onUpdatePendingCount(pendingRequests.length);
-    }
-  }, [friendsList, pendingRequests, outgoingRequests, onUpdatePendingCount]);
+    if (!myUid || myUid === 'guest') return;
+    getPendingRequestsFromDb(myUid).then(reqs => {
+      setPendingRequests(reqs);
+      if (onUpdatePendingCount) {
+        onUpdatePendingCount(reqs.length);
+      }
+    });
+    setFriendsList(getFriendsListFromDb(myUid));
+    setOutgoingRequests(getOutgoingRequestsFromDb(myUid));
+  }, [myUid, onUpdatePendingCount]);
 
   // Handle Instagram handle save
   const handleSaveInstaHandle = (e) => {
@@ -53,8 +71,8 @@ export function SocialLeaderboardModal({ user, userSteps, activeKcal, distanceKm
   };
 
   const handleShareInstaInvite = () => {
-    const handleText = instaHandle ? `@${instaHandle}` : 'PacePulse AI';
-    const text = `👟 Join my PacePulse AI Leaderboard! Search my handle: ${handleText}`;
+    const userTag = currentUser?.username || `@${(currentUser?.email || 'user').split('@')[0]}`;
+    const text = `👟 Join my PacePulse AI Leaderboard! Add my unique user ID: ${userTag}`;
     if (navigator.share) {
       navigator.share({ title: 'PacePulse AI Leaderboard', text, url: 'https://pacepulse-ai.web.app' }).catch(() => {});
     } else {
@@ -65,16 +83,17 @@ export function SocialLeaderboardModal({ user, userSteps, activeKcal, distanceKm
 
   // Construct real user leaderboard entries (NO DUMMY MOCK USERS!)
   const currentUserEntry = {
-    id: user?.uid || 'me',
-    name: user?.displayName || user?.profile?.name || 'You (Me)',
+    id: myUid,
+    name: currentUser?.displayName || currentUser?.profile?.name || currentProfile?.name || 'You (Me)',
     insta: instaHandle ? `@${instaHandle.replace('@', '')}` : '',
-    steps: userSteps || 0,
-    kcal: activeKcal || 0,
-    dist: distanceKm || 0,
+    steps: currentSteps || 0,
+    kcal: Math.round(currentSteps * 0.04),
+    dist: Math.round((currentSteps * 0.72) / 10) / 100,
     isMe: true
   };
 
-  const leaderboardEntries = [currentUserEntry, ...friendsList.filter(f => f.status === 'connected')]
+  const connectedFriends = friendsList.filter(f => f && (f.status === 'connected' || f.id));
+  const leaderboardEntries = [currentUserEntry, ...connectedFriends]
     .sort((a, b) => b.steps - a.steps);
 
   // Send 2-Way Friend Request with User Validation
@@ -92,6 +111,12 @@ export function SocialLeaderboardModal({ user, userSteps, activeKcal, distanceKm
 
     const target = validation.targetUser;
 
+    // Check if sending to yourself
+    if (target.uid === myUid || target.email.toLowerCase() === (currentUser?.email || '').toLowerCase()) {
+      alert("⚠️ You cannot send a connection request to yourself!");
+      return;
+    }
+
     // Check if already connected
     if (friendsList.some(f => f.id === target.uid || f.name.toLowerCase() === target.displayName.toLowerCase())) {
       alert(`⚠️ You are already connected with ${target.displayName}!`);
@@ -104,45 +129,22 @@ export function SocialLeaderboardModal({ user, userSteps, activeKcal, distanceKm
       return;
     }
 
-    const newOutgoing = {
-      id: Date.now().toString(),
-      toUid: target.uid,
-      toName: target.displayName,
-      toEmail: target.email,
-      sentAt: new Date().toISOString()
-    };
-
+    const newOutgoing = await sendFriendRequestInDb(currentUser || { uid: myUid, displayName: 'Me', email: 'me@app.com' }, target);
     setOutgoingRequests([...outgoingRequests, newOutgoing]);
     setSearchQuery('');
-    alert(`✨ Connection request sent to ${target.displayName}! They will receive your request in their Notification Bell.`);
-  };
-
-  const handleAcceptRequest = (req) => {
-    const acceptedFriend = {
-      id: req.id || Date.now().toString(),
-      name: req.name,
-      insta: req.insta || '',
-      steps: 0,
-      kcal: 0,
-      dist: 0,
-      status: 'connected'
-    };
-    setFriendsList([...friendsList, acceptedFriend]);
-    setPendingRequests(pendingRequests.filter(r => r.id !== req.id));
-    alert(`🎉 Connected with ${req.name}! Both of you can now see each other on the Leaderboard.`);
-  };
-
-  const handleDeclineRequest = (reqId) => {
-    setPendingRequests(pendingRequests.filter(r => r.id !== reqId));
+    alert(`✨ Connection request sent to ${target.displayName} (${target.username})! They will receive your request in their notification bell.`);
   };
 
   const handleCancelOutgoing = (reqId) => {
-    setOutgoingRequests(outgoingRequests.filter(r => r.id !== reqId));
+    const updatedOut = cancelOutgoingRequestInDb(myUid, reqId);
+    setOutgoingRequests(updatedOut);
   };
 
   const handleRemoveFriend = (friendId, friendName) => {
-    if (confirm(`Are you sure you want to remove ${friendName} from your connections?`)) {
-      setFriendsList(friendsList.filter(f => f.id !== friendId));
+    if (window.confirm(`Are you sure you want to remove ${friendName} from your active connections?`)) {
+      const updatedFriends = removeFriendInDb(myUid, friendId);
+      setFriendsList(updatedFriends);
+      alert(`✨ Removed ${friendName} from your connections.`);
     }
   };
 
@@ -180,7 +182,7 @@ export function SocialLeaderboardModal({ user, userSteps, activeKcal, distanceKm
               🏆 Social Connections & Leaderboard
             </h2>
             <p style={{ margin: '4px 0 0', fontSize: '13px', color: 'var(--text-dim)' }}>
-              Connect with real verified users & Instagram handles to compete on steps
+              Connect with real verified users via Unique ID (@tag) to compete on steps
             </p>
           </div>
           <button 
@@ -235,7 +237,7 @@ export function SocialLeaderboardModal({ user, userSteps, activeKcal, distanceKm
               cursor: 'pointer'
             }}
           >
-            👥 Connections ({friendsList.filter(f => f.status === 'connected').length})
+            👥 Connections ({connectedFriends.length})
           </button>
           <button
             onClick={() => setActiveTab('instagram')}
@@ -251,17 +253,17 @@ export function SocialLeaderboardModal({ user, userSteps, activeKcal, distanceKm
               cursor: 'pointer'
             }}
           >
-            📷 Instagram Sync
+            📷 Instagram
           </button>
         </div>
 
-        {/* Tab 1: Real Leaderboard (NO MOCK USERS!) */}
+        {/* Tab 1: Real Leaderboard */}
         {activeTab === 'leaderboard' && (
           <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px' }}>
             {leaderboardEntries.map((entry, index) => {
               const rankBadge = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `#${index + 1}`;
               return (
-                <div key={entry.id} style={{
+                <div key={entry.id || index} style={{
                   background: entry.isMe ? 'rgba(59, 130, 246, 0.15)' : 'rgba(255, 255, 255, 0.04)',
                   border: `1px solid ${entry.isMe ? 'rgba(59, 130, 246, 0.4)' : 'rgba(255, 255, 255, 0.08)'}`,
                   borderRadius: '16px',
@@ -279,13 +281,13 @@ export function SocialLeaderboardModal({ user, userSteps, activeKcal, distanceKm
                         {entry.name} {entry.insta && <span style={{ fontSize: '12px', color: '#f472b6', fontWeight: 500 }}>({entry.insta})</span>} {entry.isMe && '(You)'}
                       </div>
                       <div style={{ fontSize: '12px', color: 'var(--text-dim)', marginTop: '2px' }}>
-                        🔥 {entry.kcal} active kcal • 📏 {entry.dist} km
+                        🔥 {(entry.kcal || 0)} active kcal • 📏 {(entry.dist || 0)} km
                       </div>
                     </div>
                   </div>
 
                   <div style={{ fontSize: '18px', fontWeight: 900, color: 'var(--text-bright)' }}>
-                    🚶 {entry.steps.toLocaleString()}
+                    🚶 {(entry.steps || 0).toLocaleString()}
                   </div>
                 </div>
               );
@@ -293,14 +295,14 @@ export function SocialLeaderboardModal({ user, userSteps, activeKcal, distanceKm
           </div>
         )}
 
-        {/* Tab 2: Connections, Incoming Requests & Outgoing Requests */}
+        {/* Tab 2: Connections & Outgoing Requests */}
         {activeTab === 'friends' && (
           <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            {/* Search and Add Friend by Name or Instagram Handle */}
+            {/* Search and Add Friend by Unique Tag (@username) or Email */}
             <div style={{ display: 'flex', gap: '8px' }}>
               <input
                 type="text"
-                placeholder="Search registered username or email..."
+                placeholder="Search by Unique Tag (e.g. @Nevil3) or Email..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 style={{
@@ -330,64 +332,6 @@ export function SocialLeaderboardModal({ user, userSteps, activeKcal, distanceKm
                 {isSearching ? 'Checking...' : '+ Connect'}
               </button>
             </div>
-
-            {/* Incoming Requests Sent TO Me */}
-            {pendingRequests.length > 0 && (
-              <div>
-                <div style={{ fontSize: '12px', fontWeight: 700, color: '#fbbf24', textTransform: 'uppercase', marginBottom: '8px' }}>
-                  Incoming Connection Requests ({pendingRequests.length})
-                </div>
-                {pendingRequests.map(req => (
-                  <div key={req.id} style={{
-                    background: 'rgba(245, 158, 11, 0.08)',
-                    border: '1px solid rgba(245, 158, 11, 0.2)',
-                    borderRadius: '12px',
-                    padding: '12px 16px',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    marginBottom: '8px'
-                  }}>
-                    <div>
-                      <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-bright)' }}>{req.name}</div>
-                      <div style={{ fontSize: '11px', color: 'var(--text-dim)' }}>wants to connect on Leaderboard</div>
-                    </div>
-                    <div style={{ display: 'flex', gap: '6px' }}>
-                      <button
-                        onClick={() => handleAcceptRequest(req)}
-                        style={{
-                          padding: '6px 12px',
-                          borderRadius: '8px',
-                          background: '#10b981',
-                          border: 'none',
-                          color: 'white',
-                          fontWeight: 700,
-                          fontSize: '12px',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        Accept
-                      </button>
-                      <button
-                        onClick={() => handleDeclineRequest(req.id)}
-                        style={{
-                          padding: '6px 12px',
-                          borderRadius: '8px',
-                          background: 'rgba(239, 68, 68, 0.2)',
-                          border: 'none',
-                          color: '#f87171',
-                          fontWeight: 600,
-                          fontSize: '12px',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        Decline
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
 
             {/* Outgoing Requests Sent BY Me (Pending Acceptance) */}
             {outgoingRequests.length > 0 && (
@@ -422,67 +366,72 @@ export function SocialLeaderboardModal({ user, userSteps, activeKcal, distanceKm
                         cursor: 'pointer'
                       }}
                     >
-                      Cancel
+                      Cancel Request
                     </button>
                   </div>
                 ))}
               </div>
             )}
 
-            {/* Connected Friends List */}
+            {/* Active Connections List with Remove Option */}
             <div>
               <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', marginBottom: '8px' }}>
-                Your Connected Friends ({friendsList.filter(f => f.status === 'connected').length})
+                Your Active Connections ({connectedFriends.length})
               </div>
-              {friendsList.filter(f => f.status === 'connected').length === 0 ? (
+              {connectedFriends.length === 0 ? (
                 <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-dim)', fontSize: '13px' }}>
-                  You have no connected friends yet. Search a registered username above to connect!
+                  You have no connected friends yet. Search a unique user ID (@tag) above to send a request!
                 </div>
               ) : (
-                friendsList.filter(f => f.status === 'connected').map(friend => (
+                connectedFriends.map(friend => (
                   <div key={friend.id} style={{
                     background: 'rgba(255, 255, 255, 0.04)',
                     border: '1px solid rgba(255, 255, 255, 0.08)',
-                    borderRadius: '12px',
+                    borderRadius: '14px',
                     padding: '12px 16px',
                     display: 'flex',
                     justifyContent: 'space-between',
                     alignItems: 'center',
-                    marginBottom: '8px'
+                    marginBottom: '10px'
                   }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                       <div style={{
-                        width: '36px',
-                        height: '36px',
+                        width: '40px',
+                        height: '40px',
                         borderRadius: '50%',
-                        background: 'linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%)',
+                        background: 'linear-gradient(135deg, #00F2FE 0%, #8B5CF6 100%)',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
                         fontWeight: 800,
-                        color: 'white'
+                        color: '#040914',
+                        fontSize: '16px'
                       }}>
-                        {friend.name.charAt(0).toUpperCase()}
+                        {(friend.name || 'F').charAt(0).toUpperCase()}
                       </div>
                       <div>
                         <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-bright)' }}>{friend.name}</div>
-                        {friend.insta && <div style={{ fontSize: '11px', color: '#f472b6' }}>{friend.insta}</div>}
+                        <div style={{ fontSize: '11px', color: '#00F2FE', fontWeight: '600' }}>
+                          {friend.username || `@${(friend.email || 'user').split('@')[0]}`} • <span style={{ color: '#10B981' }}>🟢 Connected</span>
+                        </div>
                       </div>
                     </div>
+                    {/* Remove Connection Button */}
                     <button
                       onClick={() => handleRemoveFriend(friend.id, friend.name)}
                       style={{
                         padding: '6px 12px',
                         borderRadius: '8px',
                         background: 'rgba(239, 68, 68, 0.15)',
-                        border: '1px solid rgba(239, 68, 68, 0.3)',
-                        color: '#f87171',
-                        fontSize: '11px',
+                        border: '1px solid rgba(239, 68, 68, 0.35)',
+                        color: '#F87171',
+                        fontSize: '12px',
                         fontWeight: 700,
                         cursor: 'pointer'
                       }}
+                      title="Remove Connection"
                     >
-                      Remove
+                      🗑️ Remove
                     </button>
                   </div>
                 ))

@@ -82,5 +82,25 @@ describe('PacePulse AI - Component & Integration Unit Tests', () => {
 
       expect(screen.getByText(/Streak & Badges/i)).toBeDefined();
     });
+
+    it('dynamically updates streak and badges when goal is increased mid-day', () => {
+      // 1. Goal = 100, Steps = 100 => Goal Reached
+      const { rerender } = render(
+        <StreakTracker streakDays={1} currentSteps={100} dailyGoal={100} history={[]} onOpenShareModal={vi.fn()} />
+      );
+      expect(screen.getByText(/1 Day Active Streak/i)).toBeDefined();
+
+      // 2. Goal raised to 1000, Steps still 100 => Goal NOT Reached, streak becomes 0
+      rerender(
+        <StreakTracker streakDays={0} currentSteps={100} dailyGoal={1000} history={[]} onOpenShareModal={vi.fn()} />
+      );
+      expect(screen.getByText(/0 Day Active Streak/i)).toBeDefined();
+
+      // 3. Steps hit 1000 => Goal Reached again, streak back to 1
+      rerender(
+        <StreakTracker streakDays={1} currentSteps={1000} dailyGoal={1000} history={[]} onOpenShareModal={vi.fn()} />
+      );
+      expect(screen.getByText(/1 Day Active Streak/i)).toBeDefined();
+    });
   });
 });

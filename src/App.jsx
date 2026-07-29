@@ -11,35 +11,46 @@ import { AuthModal } from './components/AuthModal';
 import { ResetConfirmationModal } from './components/ResetConfirmationModal';
 import { HistoryModal } from './components/HistoryModal';
 import { SocialLeaderboardModal } from './components/SocialLeaderboardModal';
+import { NotificationModal } from './components/NotificationModal';
 import { speakMilestoneAnnouncement, speakGoalReachedAnnouncement, setAudioCoachMuted } from './utils/audioCoach';
 import { 
   auth, 
   signOut,
   saveDailyLogsToDb,
-  getDailyLogsFromDb
+  getDailyLogsFromDb,
+  getPendingRequestsFromDb
 } from './firebase';
 import { 
   DEFAULT_PROFILE, 
   calculateCalories, 
-  generateEmptyHourlyData
+  calculateDistanceKm, 
+  calculateAgeFromBirthDate, 
+  calculateBMR, 
+  calculateStrideCm 
 } from './utils/fitnessEngine';
 
+// Generate 24 empty hourly buckets (00:00 to 23:00)
+function generateEmptyHourlyData() {
+  return Array.from({ length: 24 }, (_, i) => ({
+    hour: i,
+    label: `${i.toString().padStart(2, '0')}:00`,
+    steps: 0
+  }));
+}
+
 export default function App() {
-  // Persisted User Auth State
+  // Current Authenticated User State
   const [user, setUser] = useState(() => {
-    const savedUser = localStorage.getItem('pacepulse_user');
-    return savedUser ? JSON.parse(savedUser) : null;
+    const saved = localStorage.getItem('pacepulse_user');
+    return saved ? JSON.parse(saved) : null;
   });
 
-  const [showAuthModal, setShowAuthModal] = useState(false);
-
-  // Derive user storage key helper
   const getUserKey = (prefix, currentUser = user) => {
-    const key = currentUser ? (currentUser.uid || currentUser.email) : 'guest';
-    return `${prefix}_${key}`;
+    const uid = currentUser ? currentUser.uid : 'guest';
+    return `${prefix}_${uid}`;
   };
 
-  // User Profile State
+  // User Profile Parameters State
   const [profile, setProfile] = useState(() => {
     const key = user ? getUserKey('pacepulse_profile', user) : 'pacepulse_profile_guest';
     const saved = localStorage.getItem(key);
@@ -52,6 +63,7 @@ export default function App() {
   const [showResetModal, setShowResetModal] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [showSocialModal, setShowSocialModal] = useState(false);
+  const [showNotificationModal, setShowNotificationModal] = useState(false);
   const [socialTab, setSocialTab] = useState('leaderboard');
   const [isAudioMuted, setIsMuted] = useState(false);
 
@@ -74,7 +86,7 @@ export default function App() {
   const [streakDays, setStreakDays] = useState(() => {
     const key = user ? getUserKey('pacepulse_streak', user) : 'pacepulse_streak_guest';
     const saved = localStorage.getItem(key);
-    return saved ? parseInt(saved, 10) : 1;
+    return saved !== null ? parseInt(saved, 10) : 0;
   });
 
   // 7-Day History Log
@@ -90,13 +102,127 @@ export default function App() {
   // Compute live Calories, Distance & MET Active Time
   const caloriesData = calculateCalories(totalDailySteps, profile);
 
-  // Instant Native Android Hardware Step Sync Bridge & 1-Second Auto Polling
+  const isGoalReached = totalDailySteps >= profile.dailyGoal;
+
+  // Calculate dynamic streak: consecutive daily goal achievements
+  const computedStreakDays = React.useMemo(() => {
+    let count = 0;
+    const sortedHistory = [...weeklyHistory].sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+    for (const log of sortedHistory) {
+      if (log.date === todayStr) continue;
+      if (log.steps >= (log.goal || profile.dailyGoal) && log.steps > 0) {
+        count++;
+      } else {
+        break;
+      }
+    }
+    if (isGoalReached) count++;
+    return count;
+  }, [weeklyHistory, todayStr, isGoalReached, profile.dailyGoal]);
+
+  const [prevGoalReached, setPrevGoalReached] = useState(isGoalReached);
+  const [lastMilestoneSpoken, setLastMilestoneSpoken] = useState(0);
+
+  // Show Auth Modal if not logged in
+  const [showAuthModal, setShowAuthModal] = useState(!user);
+
+  // Pending connection requests for Notification Dot & Modal
+  const [pendingRequestsList, setPendingRequestsList] = useState([]);
+  const [lastReadTime, setLastReadTime] = useState(() => {
+    const saved = localStorage.getItem('pacepulse_notifications_read_time');
+    return saved ? parseInt(saved, 10) : 0;
+  });
+
+  const refreshPendingRequests = () => {
+    if (!user || user.uid === 'guest') return;
+    getPendingRequestsFromDb(user.uid).then(reqs => setPendingRequestsList(reqs));
+  };
+
+  useEffect(() => {
+    refreshPendingRequests();
+  }, [user]);
+
+  const isEveningGoalWarning = new Date().getHours() >= 20 && totalDailySteps < profile.dailyGoal;
+  const hasActiveNotifications = pendingRequestsList.length > 0 || isGoalReached || isEveningGoalWarning;
+
+  // Notification red dot on Navbar Bell icon
+  const hasUnreadDot = hasActiveNotifications && (
+    (pendingRequestsList.length > 0 && pendingRequestsList.some(r => new Date(r.sentAt || 0).getTime() > lastReadTime)) ||
+    (isGoalReached && (Date.now() - lastReadTime > 3600000)) ||
+    (isEveningGoalWarning && (Date.now() - lastReadTime > 3600000))
+  );
+
+  const handleOpenNotificationsModal = () => {
+    setShowNotificationModal(true);
+    const now = Date.now();
+    setLastReadTime(now);
+    localStorage.setItem('pacepulse_notifications_read_time', String(now));
+  };
+
+  // Milestone confetti & Voice Coach triggers
+  useEffect(() => {
+    if (isGoalReached && !prevGoalReached) {
+      confetti({
+        particleCount: 120,
+        spread: 70,
+        origin: { y: 0.6 }
+      });
+      speakGoalReachedAnnouncement(profile.dailyGoal, caloriesData.activeKcal);
+      setPrevGoalReached(true);
+    } else if (!isGoalReached && prevGoalReached) {
+      setPrevGoalReached(false);
+    }
+
+    const milestoneIntervals = [2500, 5000, 7500, 10000, 15000, 20000];
+    const currentMilestone = milestoneIntervals.filter(m => totalDailySteps >= m).pop() || 0;
+    
+    if (currentMilestone > lastMilestoneSpoken && currentMilestone < profile.dailyGoal) {
+      speakMilestoneAnnouncement(currentMilestone, profile.dailyGoal);
+      setLastMilestoneSpoken(currentMilestone);
+    }
+  }, [totalDailySteps, profile.dailyGoal, isGoalReached, prevGoalReached, lastMilestoneSpoken, caloriesData.activeKcal]);
+
+  // Persist hourly data, streak & profile to user-scoped localStorage & Firestore DB
+  useEffect(() => {
+    const key = getUserKey('pacepulse_hourly');
+    localStorage.setItem(key, JSON.stringify(hourlyData));
+
+    if (user && user.uid !== 'guest') {
+      saveDailyLogsToDb(
+        user.uid,
+        todayStr,
+        totalDailySteps,
+        profile.dailyGoal,
+        caloriesData,
+        hourlyData
+      );
+    }
+  }, [hourlyData, user, profile.dailyGoal, totalDailySteps, caloriesData, todayStr]);
+
+  useEffect(() => {
+    const key = getUserKey('pacepulse_profile');
+    localStorage.setItem(key, JSON.stringify(profile));
+  }, [profile, user]);
+
+  useEffect(() => {
+    const key = getUserKey('pacepulse_streak');
+    localStorage.setItem(key, String(streakDays));
+  }, [streakDays, user]);
+
+  useEffect(() => {
+    const key = getUserKey('pacepulse_history');
+    localStorage.setItem(key, JSON.stringify(weeklyHistory));
+  }, [weeklyHistory, user]);
+
+  // Expose Hardware Step JS Bridge listener (`window.syncNativeTodaySteps`)
   useEffect(() => {
     window.syncNativeTodaySteps = (totalSteps) => {
+      if (typeof totalSteps !== 'number' || isNaN(totalSteps)) return;
+
       setHourlyData(prev => {
         const next = [...prev];
         const hour = new Date().getHours();
-        const otherHoursSum = prev.reduce((sum, h, idx) => idx === hour ? sum : sum + h.steps, 0);
+        const otherHoursSum = prev.reduce((acc, item, idx) => idx === hour ? acc : acc + item.steps, 0);
         const currentHourSteps = Math.max(totalSteps - otherHoursSum, 0);
         next[hour] = {
           ...next[hour],
@@ -149,7 +275,7 @@ export default function App() {
       } else {
         const newProfile = {
           ...DEFAULT_PROFILE,
-          name: authenticatedUser.displayName || 'My Profile',
+          name: authenticatedUser.displayName || 'PacePulse User',
           email: authenticatedUser.email || ''
         };
         setProfile(newProfile);
@@ -157,125 +283,26 @@ export default function App() {
       }
     }
 
-    try {
-      const cloudLogs = await getDailyLogsFromDb(authenticatedUser.uid);
-      if (cloudLogs && cloudLogs.length > 0) {
-        setWeeklyHistory(cloudLogs);
+    if (authenticatedUser.uid && authenticatedUser.uid !== 'guest') {
+      const remoteLogs = await getDailyLogsFromDb(authenticatedUser.uid);
+      if (remoteLogs && remoteLogs.length > 0) {
         const historyKey = getUserKey('pacepulse_history', authenticatedUser);
-        localStorage.setItem(historyKey, JSON.stringify(cloudLogs));
+        setWeeklyHistory(remoteLogs);
+        localStorage.setItem(historyKey, JSON.stringify(remoteLogs));
       }
-    } catch (e) {
-      console.warn("Cloud log sync error:", e);
     }
-
-    setShowAuthModal(false);
   };
 
-  // Handle Sign Out
-  const handleSignOut = async () => {
-    try {
-      await signOut(auth);
-    } catch (e) {}
+  // Sign Out Handler
+  const handleSignOut = () => {
+    signOut();
     setUser(null);
     localStorage.removeItem('pacepulse_user');
+    setProfile(DEFAULT_PROFILE);
+    setHourlyData(generateEmptyHourlyData());
+    setShowAuthModal(true);
   };
 
-  // Sync profile state changes to LocalStorage
-  useEffect(() => {
-    const key = getUserKey('pacepulse_profile');
-    localStorage.setItem(key, JSON.stringify(profile));
-  }, [profile, user]);
-
-  useEffect(() => {
-    const key = getUserKey('pacepulse_hourly');
-    localStorage.setItem(key, JSON.stringify(hourlyData));
-
-    if (user && user.uid && user.uid !== 'guest') {
-      saveDailyLogsToDb(user.uid, todayStr, totalDailySteps, profile.dailyGoal, caloriesData, hourlyData);
-    }
-  }, [hourlyData, totalDailySteps, profile.dailyGoal, user]);
-
-  useEffect(() => {
-    const key = getUserKey('pacepulse_streak');
-    localStorage.setItem(key, String(streakDays));
-  }, [streakDays, user]);
-
-  useEffect(() => {
-    const key = getUserKey('pacepulse_history');
-    localStorage.setItem(key, JSON.stringify(weeklyHistory));
-  }, [weeklyHistory, user]);
-
-  const isGoalReached = totalDailySteps >= profile.dailyGoal && totalDailySteps > 0;
-
-  useEffect(() => {
-    if (isGoalReached) {
-      confetti({
-        particleCount: 80,
-        spread: 70,
-        origin: { y: 0.6 }
-      });
-      speakGoalReachedAnnouncement(profile.dailyGoal, caloriesData.activeKcal);
-    }
-  }, [isGoalReached]);
-
-  // Web Motion Fallback
-  useEffect(() => {
-    if (window.addNativeSteps) return;
-
-    let gravityX = 0;
-    let gravityY = 0;
-    let gravityZ = 0;
-    let lastStepTime = 0;
-    const windowSize = 4;
-    const accelBuffer = [];
-
-    const handleMotion = (event) => {
-      const acc = event.accelerationIncludingGravity;
-      if (!acc || acc.x === null) return;
-
-      const alpha = 0.8;
-      gravityX = alpha * gravityX + (1 - alpha) * acc.x;
-      gravityY = alpha * gravityY + (1 - alpha) * acc.y;
-      gravityZ = alpha * gravityZ + (1 - alpha) * acc.z;
-
-      const linearX = acc.x - gravityX;
-      const linearY = acc.y - gravityY;
-      const linearZ = acc.z - gravityZ;
-
-      const gMagnitude = Math.sqrt(linearX * linearX + linearY * linearY + linearZ * linearZ);
-      accelBuffer.push(gMagnitude);
-      if (accelBuffer.length > windowSize) accelBuffer.shift();
-
-      const smoothMag = accelBuffer.reduce((a, b) => a + b, 0) / accelBuffer.length;
-      const now = Date.now();
-
-      if (smoothMag > 2.5 && (now - lastStepTime) > 300) {
-        lastStepTime = now;
-        const currentHour = new Date().getHours();
-
-        setHourlyData(prev => {
-          const next = [...prev];
-          next[currentHour] = {
-            ...next[currentHour],
-            steps: next[currentHour].steps + 1
-          };
-          return next;
-        });
-      }
-    };
-
-    if (window.DeviceMotionEvent) {
-      window.addEventListener('devicemotion', handleMotion);
-    }
-
-    return () => {
-      if (window.DeviceMotionEvent) {
-        window.removeEventListener('devicemotion', handleMotion);
-      }
-    };
-  }, []);
-
-  // Reset daily steps baseline
   const handleResetBaseline = () => {
     setHourlyData(generateEmptyHourlyData());
 
@@ -303,11 +330,15 @@ export default function App() {
         onOpenProfile={() => setShowProfileModal(true)}
         onOpenHistory={() => setShowHistoryModal(true)}
         onOpenSocial={handleOpenSocialTab}
+        onOpenNotifications={handleOpenNotificationsModal}
         user={user}
         onOpenAuth={() => setShowAuthModal(true)}
         onSignOut={handleSignOut}
         isAudioMuted={isAudioMuted}
         onToggleAudioMute={handleToggleAudioMute}
+        streakDays={computedStreakDays}
+        pendingCount={pendingRequestsList.length}
+        hasUnreadDot={hasUnreadDot}
       />
 
       {/* Main Content Layout */}
@@ -339,7 +370,7 @@ export default function App() {
 
           {/* Streak & Consistency Badge Section with Live Steps */}
           <StreakTracker 
-            streakDays={streakDays}
+            streakDays={computedStreakDays}
             history={weeklyHistory}
             dailyGoal={profile.dailyGoal}
             currentSteps={totalDailySteps}
@@ -391,6 +422,22 @@ export default function App() {
           currentSteps={totalDailySteps}
           initialTab={socialTab}
           onClose={() => setShowSocialModal(false)}
+        />
+      )}
+
+      {showNotificationModal && (
+        <NotificationModal
+          user={user}
+          currentSteps={totalDailySteps}
+          dailyGoal={profile.dailyGoal}
+          pendingRequests={pendingRequestsList}
+          onRefreshPendingRequests={refreshPendingRequests}
+          onClose={() => setShowNotificationModal(false)}
+          onMarkNotificationsRead={() => {
+            const now = Date.now();
+            setLastReadTime(now);
+            localStorage.setItem('pacepulse_notifications_read_time', String(now));
+          }}
         />
       )}
 

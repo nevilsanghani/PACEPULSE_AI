@@ -3,7 +3,9 @@ import { X, Lock, Mail, User, ArrowRight, AlertCircle, Database } from 'lucide-r
 import { calculateAgeFromBirthDate, calculateStrideCm } from '../utils/fitnessEngine';
 import { registerUserInDb, loginUserInDb } from '../firebase';
 
-export function AuthModal({ onAuthSuccess, onGuestLogin, onClose }) {
+export function AuthModal({ onSuccess, onAuthSuccess, onGuestLogin, onClose }) {
+  const handleSuccess = onSuccess || onAuthSuccess || (() => {});
+
   const [isSignUp, setIsSignUp] = useState(false);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -58,7 +60,7 @@ export function AuthModal({ onAuthSuccess, onGuestLogin, onClose }) {
   // Computed Age
   const computedAge = calculateAgeFromBirthDate(birthDate);
 
-  // Email Sign In / Sign Up handler with Production Database Sync
+  // Email Sign In / Sign Up handler
   const handleEmailAuth = async (e) => {
     e.preventDefault();
     setErrorMsg('');
@@ -109,7 +111,7 @@ export function AuthModal({ onAuthSuccess, onGuestLogin, onClose }) {
 
       try {
         const newUser = await registerUserInDb(cleanEmail, cleanPassword, name.trim(), profileObj);
-        onAuthSuccess(newUser);
+        handleSuccess(newUser);
         setLoading(false);
         onClose();
       } catch (err) {
@@ -117,12 +119,12 @@ export function AuthModal({ onAuthSuccess, onGuestLogin, onClose }) {
         setLoading(false);
       }
     } else {
-      // PRODUCTION DATABASE SIGN IN FLOW
+      // SIGN IN FLOW
       const res = await loginUserInDb(cleanEmail, cleanPassword);
       setLoading(false);
 
       if (res.success) {
-        onAuthSuccess(res.user);
+        handleSuccess(res.user);
         onClose();
       } else {
         setErrorMsg(res.error || 'Login failed. Please check your credentials.');
@@ -138,7 +140,11 @@ export function AuthModal({ onAuthSuccess, onGuestLogin, onClose }) {
       email: 'guest@pacepulse.app',
       isGuest: true
     };
-    onGuestLogin(guestUser);
+    if (onGuestLogin) {
+      onGuestLogin(guestUser);
+    } else {
+      handleSuccess(guestUser);
+    }
     onClose();
   };
 
@@ -388,7 +394,7 @@ export function AuthModal({ onAuthSuccess, onGuestLogin, onClose }) {
                   <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
                     Daily Step Goal
                   </label>
-                  <input type="number" step="500" className="glass-input" placeholder="10000" value={dailyGoalInput} onChange={(e) => setDailyGoalInput(e.target.value)} />
+                  <input type="number" step="100" min="100" className="glass-input" placeholder="10000" value={dailyGoalInput} onChange={(e) => setDailyGoalInput(e.target.value)} />
                 </div>
               </div>
             </>

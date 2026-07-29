@@ -55,10 +55,12 @@ object NativeStepManager {
             }
         }
 
-        // Update Android Home Screen AppWidget
+        // Update Android Home Screen AppWidgets (Solid & Glass)
         try {
-            PacePulseWidget.updateAllWidgets(context)
-        } catch (e: Exception) {}
+            PacePulseWidgetHelper.updateAllWidgets(context)
+        } catch (e: Exception) {
+            Log.w("PacePulseNative", "Widget update warning: ${e.message}")
+        }
 
         Log.d("PacePulseNative", "Current Hardware Total: $currentTotal | Midnight Baseline: $midnightBaseline | Today Steps: $todaySteps")
         return todaySteps

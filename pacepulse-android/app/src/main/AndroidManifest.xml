@@ -45,16 +45,30 @@
             </intent-filter>
         </receiver>
 
+        <!-- Widget 1: PacePulse Solid Dark -->
         <receiver
-            android:name=".PacePulseWidget"
+            android:name=".PacePulseSolidWidget"
             android:exported="true"
-            android:label="PacePulse Step Tracker">
+            android:label="PacePulse Solid Dark">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
             </intent-filter>
             <meta-data
                 android:name="android.appwidget.provider"
-                android:resource="@xml/pace_pulse_widget_info" />
+                android:resource="@xml/pace_pulse_widget_solid_info" />
+        </receiver>
+
+        <!-- Widget 2: PacePulse Glass Transparent -->
+        <receiver
+            android:name=".PacePulseGlassWidget"
+            android:exported="true"
+            android:label="PacePulse Glass Transparent">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/pace_pulse_widget_glass_info" />
         </receiver>
     </application>
 

@@ -1,7 +1,12 @@
 import React, { useState } from 'react';
+import { User, Mail, Hash, Copy, Check } from 'lucide-react';
 import { calculateBMR, calculateStrideCm, calculateAgeFromBirthDate } from '../utils/fitnessEngine';
 
 export function ProfileModal({ profile, onSave, onClose }) {
+  const [copiedTag, setCopiedTag] = useState(false);
+
+  const userTag = profile.username || `@${(profile.email || 'user').split('@')[0].replace(/[^a-z0-9]/g, '')}`;
+
   const [gender, setGender] = useState(profile.gender || 'male');
   const [birthDate, setBirthDate] = useState(profile.birthDate || '2000-01-01');
 
@@ -24,17 +29,15 @@ export function ProfileModal({ profile, onSave, onClose }) {
   const [weightLbsInput, setWeightLbsInput] = useState(String(Math.round((profile.weightKg || 70) * 2.20462 * 10) / 10));
 
   const [dailyGoalInput, setDailyGoalInput] = useState(String(profile.dailyGoal || 10000));
-  const [widgetStyle, setWidgetStyle] = useState(profile.widgetStyle || 'solid');
 
   // Calculate live user age from Birth Date
   const computedAge = calculateAgeFromBirthDate(birthDate);
 
-  // Widget Style Handler
-  const handleWidgetStyleChange = (newStyle) => {
-    setWidgetStyle(newStyle);
-    if (window.AndroidStepBridge && window.AndroidStepBridge.setWidgetStyle) {
-      window.AndroidStepBridge.setWidgetStyle(newStyle);
-    }
+  // Copy User Tag Helper
+  const handleCopyTag = () => {
+    navigator.clipboard.writeText(userTag);
+    setCopiedTag(true);
+    setTimeout(() => setCopiedTag(false), 2500);
   };
 
   // Unit conversion handlers
@@ -126,7 +129,7 @@ export function ProfileModal({ profile, onSave, onClose }) {
       strideCm: liveStride,
       heightUnit,
       weightUnit,
-      widgetStyle,
+      username: userTag,
       useAutoStride: true
     };
     onSave(updatedProfile);
@@ -156,14 +159,14 @@ export function ProfileModal({ profile, onSave, onClose }) {
         borderRadius: '24px',
         padding: '28px'
       }}>
-        {/* Header */}
+        {/* Modal Header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
           <div>
             <h2 style={{ fontSize: '20px', fontWeight: '800', margin: 0 }}>
               Physiology & Preferences
             </h2>
             <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '2px 0 0' }}>
-              Calibrates stride length, BMR & Widget Style
+              Calibrates stride length, BMR & Fitness Account
             </p>
           </div>
           <button
@@ -184,6 +187,55 @@ export function ProfileModal({ profile, onSave, onClose }) {
           >
             ✕
           </button>
+        </div>
+
+        {/* Prominent User Identity Card (Name, Email & Unique Tag/ID) */}
+        <div style={{
+          background: 'linear-gradient(135deg, rgba(0, 242, 254, 0.12) 0%, rgba(139, 92, 246, 0.1) 100%)',
+          border: '1px solid rgba(0, 242, 254, 0.3)',
+          borderRadius: '18px',
+          padding: '16px',
+          marginBottom: '20px'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <User size={18} color="#00F2FE" />
+              <span style={{ fontSize: '15px', fontWeight: '800', color: '#FFFFFF' }}>
+                {profile.name || 'User Profile'}
+              </span>
+            </div>
+            {/* Copy Unique User Tag Button */}
+            <button
+              type="button"
+              onClick={handleCopyTag}
+              style={{
+                background: 'rgba(0, 242, 254, 0.2)',
+                border: '1px solid rgba(0, 242, 254, 0.5)',
+                color: '#00F2FE',
+                fontSize: '11px',
+                fontWeight: '700',
+                padding: '4px 10px',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px'
+              }}
+              title="Copy Unique User Tag to share with friends"
+            >
+              {copiedTag ? <Check size={12} color="#10B981" /> : <Copy size={12} />}
+              {copiedTag ? 'Tag Copied!' : userTag}
+            </button>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'var(--text-muted)' }}>
+            <Mail size={14} color="#94A3B8" />
+            <span>{profile.email || 'guest@pacepulse.app'}</span>
+          </div>
+
+          <div style={{ marginTop: '8px', fontSize: '11px', color: '#00F2FE', fontWeight: '600' }}>
+            💡 Share your unique tag <strong style={{ color: '#FFFFFF' }}>{userTag}</strong> with friends to receive connection requests!
+          </div>
         </div>
 
         <form onSubmit={handleSubmit}>
@@ -396,47 +448,6 @@ export function ProfileModal({ profile, onSave, onClose }) {
               value={dailyGoalInput}
               onChange={(e) => setDailyGoalInput(e.target.value)}
             />
-          </div>
-
-          {/* Android Home Screen Widget Theme Preference */}
-          <div style={{ marginBottom: '20px' }}>
-            <label style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-muted)', display: 'block', marginBottom: '6px' }}>
-              Android Home Screen Widget Style
-            </label>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-              <button
-                type="button"
-                onClick={() => handleWidgetStyleChange('solid')}
-                style={{
-                  border: `1.5px solid ${widgetStyle === 'solid' ? '#00F2FE' : 'rgba(255, 255, 255, 0.1)'}`,
-                  background: widgetStyle === 'solid' ? 'rgba(0, 242, 254, 0.12)' : 'rgba(255, 255, 255, 0.03)',
-                  color: widgetStyle === 'solid' ? '#00F2FE' : 'var(--text-muted)',
-                  fontWeight: '700',
-                  fontSize: '12px',
-                  padding: '10px',
-                  borderRadius: '12px',
-                  cursor: 'pointer'
-                }}
-              >
-                🌙 Solid Cyber Dark
-              </button>
-              <button
-                type="button"
-                onClick={() => handleWidgetStyleChange('transparent')}
-                style={{
-                  border: `1.5px solid ${widgetStyle === 'transparent' ? '#38BDF8' : 'rgba(255, 255, 255, 0.1)'}`,
-                  background: widgetStyle === 'transparent' ? 'rgba(56, 189, 248, 0.12)' : 'rgba(255, 255, 255, 0.03)',
-                  color: widgetStyle === 'transparent' ? '#38BDF8' : 'var(--text-muted)',
-                  fontWeight: '700',
-                  fontSize: '12px',
-                  padding: '10px',
-                  borderRadius: '12px',
-                  cursor: 'pointer'
-                }}
-              >
-                💎 Glass Transparent
-              </button>
-            </div>
           </div>
 
           {/* Live Calibrated Metrics Preview Box */}

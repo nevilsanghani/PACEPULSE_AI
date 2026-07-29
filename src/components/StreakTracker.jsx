@@ -1,13 +1,12 @@
 import React from 'react';
 import { Flame, Award, Calendar, CheckCircle2, Share2, Sparkles, ShieldCheck } from 'lucide-react';
 
-export function StreakTracker({ streakDays = 1, history = [], dailyGoal = 10000, currentSteps = 0, onOpenShareModal }) {
+export function StreakTracker({ streakDays = 0, history = [], dailyGoal = 10000, currentSteps = 0, onOpenShareModal }) {
   // Days of the week (Mon-Sun)
   const daysOfWeek = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
-  // Compute live current streak including today's completion
   const isTodayGoalHit = currentSteps >= dailyGoal && currentSteps > 0;
-  const activeStreak = isTodayGoalHit ? Math.max(streakDays, 1) : streakDays;
+  const activeStreak = streakDays;
 
   return (
     <div className="glass-panel" style={{ padding: '28px' }}>
