@@ -3,13 +3,13 @@ import confetti from 'canvas-confetti';
 import { Navbar } from './components/Navbar';
 import { StepRing } from './components/StepRing';
 import { HourlyChart } from './components/HourlyChart';
+import { WeeklyStepChart } from './components/WeeklyStepChart';
 import { StreakTracker } from './components/StreakTracker';
 import { ProfileModal } from './components/ProfileModal';
 import { ShareModal } from './components/ShareModal';
 import { AuthModal } from './components/AuthModal';
 import { ResetConfirmationModal } from './components/ResetConfirmationModal';
 import { HistoryModal } from './components/HistoryModal';
-import { CalorieTrackerWidget } from './components/CalorieTrackerWidget';
 import { SocialLeaderboardModal } from './components/SocialLeaderboardModal';
 import { speakMilestoneAnnouncement, setAudioCoachMuted } from './utils/audioCoach';
 import { 
@@ -55,13 +55,6 @@ export default function App() {
 
   // Daily Steps Sum
   const totalDailySteps = hourlyData.reduce((sum, h) => sum + h.steps, 0);
-
-  // Food Intake Calories State
-  const [foodIntakeKcal, setFoodIntakeKcal] = useState(() => {
-    const key = user ? getUserKey('pacepulse_food', user) : 'pacepulse_food_guest';
-    const saved = localStorage.getItem(key);
-    return saved ? parseInt(saved) : 0;
-  });
 
   // Audio Coach Mute Toggle State
   const [isMuted, setIsMuted] = useState(false);
@@ -114,14 +107,6 @@ export default function App() {
     const nextMuted = !isMuted;
     setIsMuted(nextMuted);
     setAudioCoachMuted(nextMuted);
-  };
-
-  // Add Meal Handler
-  const handleAddMeal = (meal) => {
-    const nextIntake = foodIntakeKcal + meal.calories;
-    setFoodIntakeKcal(nextIntake);
-    const key = getUserKey('pacepulse_food');
-    localStorage.setItem(key, String(nextIntake));
   };
 
   // Native Android Bridge Window Listener
@@ -300,7 +285,6 @@ export default function App() {
       } catch (e) {}
     }
     setHourlyData(generateEmptyHourlyData());
-    setFoodIntakeKcal(0);
     setStreakDays(0);
     setWeeklyHistory(Array.from({ length: 7 }, () => ({ completed: false, steps: 0 })));
     setShowResetModal(false);
@@ -440,11 +424,11 @@ export default function App() {
           />
         </div>
 
-        {/* Net Active Calorie Balance Widget */}
-        <CalorieTrackerWidget
-          activeKcal={caloriesData.activeKcal}
-          foodIntakeKcal={foodIntakeKcal}
-          onAddMeal={handleAddMeal}
+        {/* Weekly Step Bar Chart (X=Day of Week, Y=Steps) */}
+        <WeeklyStepChart
+          totalDailySteps={totalDailySteps}
+          dailyGoal={profile.dailyGoal}
+          history={weeklyHistory}
         />
 
         {/* Bottom Section: 24-Hour Step Breakdown Chart */}

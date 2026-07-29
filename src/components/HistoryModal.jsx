@@ -6,29 +6,24 @@ export function HistoryModal({ user, profile, onClose }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    async function loadPastHistory() {
-      setLoading(true);
-      const logs = [];
-      const today = new Date();
+    let isMounted = true;
 
-      // Load past 14 days of activity records
+    async function loadPastHistory() {
+      const today = new Date();
+      const localLogs = [];
+      const userKey = user ? (user.uid || user.email) : 'guest';
+
+      // 1. Build instant synchronous local logs
       for (let i = 0; i < 14; i++) {
         const d = new Date(today);
         d.setDate(d.getDate() - i);
         const dateStr = d.toISOString().split('T')[0];
 
-        let dayLog = null;
+        const localHourlyKey = `pacepulse_hourly_${userKey}`;
+        const localHourly = localStorage.getItem(localHourlyKey);
 
-        // Try reading from Cloud Firestore if user is authenticated
-        if (user && user.uid && user.uid !== 'guest') {
-          dayLog = await getDailyLogsFromDb(user.uid, dateStr);
-        }
-
-        // Fallback to local storage
-        if (!dayLog) {
-          const userKey = user ? (user.uid || user.email) : 'guest';
-          const localHourly = localStorage.getItem(`pacepulse_hourly_${userKey}`);
-          if (i === 0 && localHourly) {
+        if (i === 0 && localHourly) {
+          try {
             const parsed = JSON.parse(localHourly);
             const totalSteps = parsed.reduce((sum, h) => sum + h.steps, 0);
             if (totalSteps > 0) {
@@ -36,34 +31,72 @@ export function HistoryModal({ user, profile, onClose }) {
               const distKm = (totalSteps * strideMeters) / 1000;
               const activeKcal = Math.round(totalSteps * 0.04);
               const durationMins = Math.round(totalSteps / 100);
-              dayLog = {
+              localLogs.push({
                 dateStr,
-                totalSteps,
+                displayDate: 'Today (' + d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ')',
+                steps: totalSteps,
                 activeKcal,
                 distanceKm: parseFloat(distKm.toFixed(2)),
                 durationMins
-              };
+              });
             }
-          }
-        }
-
-        if (dayLog && dayLog.totalSteps > 0) {
-          logs.push({
-            dateStr,
-            displayDate: d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }),
-            steps: dayLog.totalSteps || 0,
-            activeKcal: dayLog.activeKcal || dayLog.totalKcal || Math.round(dayLog.totalSteps * 0.04),
-            distanceKm: dayLog.distanceKm || parseFloat(((dayLog.totalSteps * 0.72) / 1000).toFixed(2)),
-            durationMins: dayLog.durationMins || Math.round(dayLog.totalSteps / 100)
-          });
+          } catch (e) {}
         }
       }
 
-      setHistoryLogs(logs);
-      setLoading(false);
+      if (isMounted) {
+        setHistoryLogs(localLogs);
+        setLoading(false);
+      }
+
+      // 2. Query Firestore asynchronously in parallel with a 2-second timeout guard
+      if (user && user.uid && user.uid !== 'guest') {
+        try {
+          const dates = Array.from({ length: 14 }, (_, i) => {
+            const d = new Date(today);
+            d.setDate(d.getDate() - i);
+            return {
+              dateStr: d.toISOString().split('T')[0],
+              displayDate: i === 0 ? 'Today (' + d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ')' : d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+            };
+          });
+
+          const timeoutPromise = new Promise(resolve => setTimeout(() => resolve([]), 2000));
+          const fetchPromise = Promise.all(dates.map(d => getDailyLogsFromDb(user.uid, d.dateStr)));
+
+          const cloudResults = await Promise.race([fetchPromise, timeoutPromise]);
+
+          if (Array.isArray(cloudResults) && cloudResults.length > 0 && isMounted) {
+            const merged = [];
+            dates.forEach((d, idx) => {
+              const cloudLog = cloudResults[idx];
+              if (cloudLog && cloudLog.totalSteps > 0) {
+                merged.push({
+                  dateStr: d.dateStr,
+                  displayDate: d.displayDate,
+                  steps: cloudLog.totalSteps || 0,
+                  activeKcal: cloudLog.activeKcal || cloudLog.totalKcal || Math.round(cloudLog.totalSteps * 0.04),
+                  distanceKm: cloudLog.distanceKm || parseFloat(((cloudLog.totalSteps * 0.72) / 1000).toFixed(2)),
+                  durationMins: cloudLog.durationMins || Math.round(cloudLog.totalSteps / 100)
+                });
+              }
+            });
+
+            if (merged.length > 0) {
+              setHistoryLogs(merged);
+            }
+          }
+        } catch (e) {
+          console.error("Firestore history fetch error:", e);
+        }
+      }
     }
 
     loadPastHistory();
+
+    return () => {
+      isMounted = false;
+    };
   }, [user, profile]);
 
   return (
