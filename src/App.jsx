@@ -109,8 +109,22 @@ export default function App() {
     setAudioCoachMuted(nextMuted);
   };
 
-  // Native Android Bridge Window Listener
+  // Native Android Bridge Window Listener (Absolute Step Sync & Delta Step Sync)
   useEffect(() => {
+    window.syncNativeTodaySteps = (totalSteps = 0) => {
+      setHourlyData(prev => {
+        const next = [...prev];
+        const hour = new Date().getHours();
+        const otherHoursSum = prev.reduce((sum, h, idx) => idx === hour ? sum : sum + h.steps, 0);
+        const currentHourSteps = Math.max(totalSteps - otherHoursSum, 0);
+        next[hour] = {
+          ...next[hour],
+          steps: currentHourSteps
+        };
+        return next;
+      });
+    };
+
     window.addNativeSteps = (count = 1) => {
       setHourlyData(prev => {
         const next = [...prev];
@@ -122,7 +136,9 @@ export default function App() {
         return next;
       });
     };
+
     return () => {
+      delete window.syncNativeTodaySteps;
       delete window.addNativeSteps;
     };
   }, []);

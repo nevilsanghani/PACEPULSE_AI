@@ -26,28 +26,16 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.WebViewAssetLoader.AssetsPathHandler
-import kotlin.math.sqrt
 
 /**
  * PacePulse AI - Native Android Application Window
- * Integrates Persistent Google Fit Style Step Engine & Vehicle Motion Filtering
+ * Integrates Persistent 24/7 Hardware Step Engine
  */
 class MainActivity : ComponentActivity(), SensorEventListener {
 
     private lateinit var webView: WebView
     private lateinit var sensorManager: SensorManager
     private var stepCounterSensor: Sensor? = null
-    private var stepDetectorSensor: Sensor? = null
-    private var accelerometerSensor: Sensor? = null
-
-    private var gravityX = 0f
-    private var gravityY = 0f
-    private var gravityZ = 0f
-    private val alpha = 0.8f
-
-    private var lastStepTime = 0L
-    private val windowSize = 4
-    private val magBuffer = ArrayList<Float>()
 
     inner class AndroidStepBridge {
         @JavascriptInterface
@@ -61,7 +49,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Request Activity Recognition & Sensor Runtime Permissions for Android 10+
+        // Request Activity Recognition & Notification Permissions
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val perms = mutableListOf(Manifest.permission.ACTIVITY_RECOGNITION)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -72,14 +60,11 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             }
         }
 
-        // Start Smart Background Step Tracking Service
+        // Start 24/7 Step Service
         startSmartStepService()
 
-        // Initialize Native Hardware Step Sensors
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         stepCounterSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
-        stepDetectorSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR)
-        accelerometerSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
 
         val assetLoader = WebViewAssetLoader.Builder()
             .addPathHandler("/", AssetsPathHandler(this))
@@ -102,6 +87,11 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                     request: WebResourceRequest?
                 ): WebResourceResponse? {
                     return request?.url?.let { assetLoader.shouldInterceptRequest(it) }
+                }
+
+                override fun onPageFinished(view: WebView?, url: String?) {
+                    super.onPageFinished(view, url)
+                    NativeStepManager.syncTodayStepsToWebView(this@MainActivity, webView)
                 }
 
                 override fun onReceivedError(
@@ -147,14 +137,8 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         stepCounterSensor?.let {
             sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_FASTEST)
         }
-        stepDetectorSensor?.let {
-            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_FASTEST)
-        }
-        accelerometerSensor?.let {
-            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
-        }
 
-        NativeStepManager.flushPendingBackgroundSteps(webView)
+        NativeStepManager.syncTodayStepsToWebView(this, webView)
     }
 
     override fun onPause() {
@@ -165,52 +149,8 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     override fun onSensorChanged(event: SensorEvent?) {
         if (event == null) return
 
-        if (!StepTrackingService.isServiceRunning) {
-            startSmartStepService()
-        }
-
-        // Primary: Cumulative Hardware Step Counter
         if (event.sensor.type == Sensor.TYPE_STEP_COUNTER) {
             NativeStepManager.processCumulativeStep(this, event.values[0], webView)
-            return
-        }
-
-        // Secondary: Hardware Step Detector Event
-        if (event.sensor.type == Sensor.TYPE_STEP_DETECTOR && stepCounterSensor == null) {
-            NativeStepManager.processSingleStepDetectorEvent(webView)
-            return
-        }
-
-        // Fallback Accelerometer (with Vehicle Vibration Filter)
-        if (event.sensor.type == Sensor.TYPE_ACCELEROMETER && stepCounterSensor == null && stepDetectorSensor == null) {
-            val rawX = event.values[0]
-            val rawY = event.values[1]
-            val rawZ = event.values[2]
-
-            gravityX = alpha * gravityX + (1 - alpha) * rawX
-            gravityY = alpha * gravityY + (1 - alpha) * rawY
-            gravityZ = alpha * gravityZ + (1 - alpha) * rawZ
-
-            val userX = rawX - gravityX
-            val userY = rawY - gravityY
-            val userZ = rawZ - gravityZ
-
-            val userMagnitude = sqrt(userX * userX + userY * userY + userZ * userZ)
-
-            magBuffer.add(userMagnitude)
-            if (magBuffer.size > windowSize) magBuffer.removeAt(0)
-
-            var sum = 0f
-            for (m in magBuffer) sum += m
-            val smoothedMag = sum / magBuffer.size
-
-            val now = System.currentTimeMillis()
-
-            // Vehicle Vibration Filter: Rejects high frequency bumps (<185ms) & extreme forces (>6.5 m/s²)
-            if (smoothedMag in 0.65f..6.5f && (now - lastStepTime) >= 185L && (now - lastStepTime) <= 1800L) {
-                lastStepTime = now
-                NativeStepManager.processSingleStepDetectorEvent(webView)
-            }
         }
     }
 

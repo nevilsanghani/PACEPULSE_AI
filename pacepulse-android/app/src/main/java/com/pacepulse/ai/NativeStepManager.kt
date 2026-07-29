@@ -7,27 +7,24 @@ import android.webkit.WebView
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import kotlin.math.min
 
 /**
- * PacePulse AI - Persistent Google Fit Style Step Engine
- * Saves Midnight Hardware Baseline to SharedPreferences so steps walked while app is CLOSED match Google Fit 100%!
+ * PacePulse AI - Absolute 24/7 Hardware Step Counter Engine
+ * Syncs exact today's step count using hardware baseline subtraction (Google Fit / Samsung Health Parity)
  */
 object NativeStepManager {
 
     private const val PREFS_NAME = "pacepulse_hardware_prefs"
     private const val KEY_MIDNIGHT_BASELINE = "midnight_hardware_baseline"
     private const val KEY_BASELINE_DATE = "baseline_date"
-
-    private var lastCumulativeTotal = -1f
-    private var pendingBackgroundSteps = 0
+    private const val KEY_TOTAL_STEPS_TODAY = "total_steps_today"
 
     private fun getTodayStr(): String {
         return SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
     }
 
     @Synchronized
-    fun processCumulativeStep(context: Context, currentTotal: Float, webView: WebView?) {
+    fun processCumulativeStep(context: Context, currentTotal: Float, webView: WebView?): Int {
         val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val todayStr = getTodayStr()
         val savedDate = prefs.getString(KEY_BASELINE_DATE, "")
@@ -39,78 +36,54 @@ object NativeStepManager {
             prefs.edit()
                 .putString(KEY_BASELINE_DATE, todayStr)
                 .putFloat(KEY_MIDNIGHT_BASELINE, midnightBaseline)
+                .putInt(KEY_TOTAL_STEPS_TODAY, 0)
                 .apply()
             Log.d("PacePulseNative", "New Day Baseline Saved: $midnightBaseline for $todayStr")
         }
 
-        if (lastCumulativeTotal < 0f) {
-            lastCumulativeTotal = currentTotal
-            
-            // Calculate steps walked while app was completely CLOSED!
-            val closedAppSteps = (currentTotal - midnightBaseline).toInt()
-            if (closedAppSteps > 0 && webView != null) {
-                Log.d("PacePulseNative", "App reopened! Syncing $closedAppSteps steps walked while app was closed.")
-                webView.post {
-                    webView.evaluateJavascript(
-                        "if(window.addNativeSteps){ window.addNativeSteps($closedAppSteps); }", null
-                    )
-                }
-            }
-            return
-        }
+        // Calculate absolute steps taken today from hardware sensor
+        val rawTodaySteps = (currentTotal - midnightBaseline).toInt()
+        val todaySteps = if (rawTodaySteps < 0) 0 else rawTodaySteps
 
-        val rawDelta = (currentTotal - lastCumulativeTotal).toInt()
-        if (rawDelta > 0) {
-            // Vehicle Vibration Filter: Cap max step delta per hardware tick (prevents vehicle bump spikes)
-            val delta = min(rawDelta, 4)
-            lastCumulativeTotal = currentTotal
+        prefs.edit().putInt(KEY_TOTAL_STEPS_TODAY, todaySteps).apply()
 
-            if (webView != null) {
-                webView.post {
-                    webView.evaluateJavascript(
-                        "if(window.addNativeSteps){ window.addNativeSteps($delta); }", null
-                    )
-                }
-            } else {
-                pendingBackgroundSteps += delta
-            }
-            Log.d("PacePulseNative", "Hardware Step Delta: $delta (Raw: $rawDelta)")
-        }
-    }
-
-    @Synchronized
-    fun processSingleStepDetectorEvent(webView: WebView?) {
         if (webView != null) {
             webView.post {
                 webView.evaluateJavascript(
-                    "if(window.addNativeSteps){ window.addNativeSteps(1); }", null
+                    "if(window.syncNativeTodaySteps){ window.syncNativeTodaySteps($todaySteps); }", null
                 )
             }
-        } else {
-            pendingBackgroundSteps += 1
         }
+
+        Log.d("PacePulseNative", "Current Hardware Total: $currentTotal | Midnight Baseline: $midnightBaseline | Today Steps: $todaySteps")
+        return todaySteps
     }
 
     @Synchronized
-    fun flushPendingBackgroundSteps(webView: WebView) {
-        if (pendingBackgroundSteps > 0) {
-            val count = pendingBackgroundSteps
-            pendingBackgroundSteps = 0
-            webView.post {
-                webView.evaluateJavascript(
-                    "if(window.addNativeSteps){ window.addNativeSteps($count); }", null
-                )
-            }
-            Log.d("PacePulseNative", "Flushed $count background steps to WebView")
+    fun getSavedTodaySteps(context: Context): Int {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.getInt(KEY_TOTAL_STEPS_TODAY, 0)
+    }
+
+    @Synchronized
+    fun syncTodayStepsToWebView(context: Context, webView: WebView) {
+        val todaySteps = getSavedTodaySteps(context)
+        webView.post {
+            webView.evaluateJavascript(
+                "if(window.syncNativeTodaySteps){ window.syncNativeTodaySteps($todaySteps); }", null
+            )
         }
+        Log.d("PacePulseNative", "Synced $todaySteps saved steps to WebView on launch/resume")
     }
 
     @Synchronized
     fun resetBaseline(context: Context) {
-        lastCumulativeTotal = -1f
-        pendingBackgroundSteps = 0
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().remove(KEY_MIDNIGHT_BASELINE).remove(KEY_BASELINE_DATE).apply()
+        prefs.edit()
+            .remove(KEY_MIDNIGHT_BASELINE)
+            .remove(KEY_BASELINE_DATE)
+            .putInt(KEY_TOTAL_STEPS_TODAY, 0)
+            .apply()
         Log.d("PacePulseNative", "Native Step Manager Baseline Reset")
     }
 }

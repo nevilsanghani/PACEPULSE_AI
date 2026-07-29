@@ -11,29 +11,20 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.os.Build
-import android.os.Handler
 import android.os.IBinder
-import android.os.Looper
 import android.util.Log
 import androidx.core.app.NotificationCompat
 
 /**
- * PacePulse AI - Battery Smart Background Step Tracking Service
- * Delegates step counting to NativeStepManager singleton with persistent SharedPreferences context
+ * PacePulse AI - 24/7 Reliable Background Step Tracking Service
+ * Listens to hardware step counter continuously without idle shutdowns
  */
 class StepTrackingService : Service(), SensorEventListener {
 
     private lateinit var sensorManager: SensorManager
     private var stepCounterSensor: Sensor? = null
     private var stepDetectorSensor: Sensor? = null
-
-    private val idleHandler = Handler(Looper.getMainLooper())
-    private val IDLE_TIMEOUT_MS = 2 * 60 * 1000L // 2 Minutes Idle Timeout
-
-    private val idleRunnable = Runnable {
-        Log.d("PacePulseBattery", "Phone idle for 2 minutes. Auto-stopping background service to save battery.")
-        stopSelf()
-    }
+    private lateinit var notificationManager: NotificationManager
 
     companion object {
         const val CHANNEL_ID = "PacePulseStepChannel"
@@ -44,63 +35,57 @@ class StepTrackingService : Service(), SensorEventListener {
     override fun onCreate() {
         super.onCreate()
         isServiceRunning = true
+        notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         createNotificationChannel()
 
-        val notification: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("PacePulse AI Step Tracker")
-            .setContentText("Smart motion step tracking active")
-            .setSmallIcon(android.R.drawable.ic_menu_compass)
-            .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .build()
-
-        startForeground(NOTIFICATION_ID, notification)
+        val initialSteps = NativeStepManager.getSavedTodaySteps(this)
+        startForeground(NOTIFICATION_ID, buildNotification(initialSteps))
 
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         stepCounterSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
         stepDetectorSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR)
 
         stepCounterSensor?.let {
-            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_FASTEST)
+            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL)
         }
         stepDetectorSensor?.let {
-            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_FASTEST)
+            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL)
         }
 
-        resetIdleTimer()
-        Log.d("PacePulseService", "Battery-Smart Motion Step Tracking Service Started.")
+        Log.d("PacePulseService", "24/7 Background Step Tracking Service Active.")
     }
 
-    private fun resetIdleTimer() {
-        idleHandler.removeCallbacks(idleRunnable)
-        idleHandler.postDelayed(idleRunnable, IDLE_TIMEOUT_MS)
+    private fun buildNotification(steps: Int): Notification {
+        val text = if (steps > 0) "🚶 $steps steps today" else "Smart step tracking active"
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("PacePulse AI Step Tracker")
+            .setContentText(text)
+            .setSmallIcon(android.R.drawable.ic_menu_compass)
+            .setOngoing(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build()
     }
 
     override fun onSensorChanged(event: SensorEvent?) {
         if (event == null) return
 
-        resetIdleTimer()
-
         if (event.sensor.type == Sensor.TYPE_STEP_COUNTER) {
-            NativeStepManager.processCumulativeStep(this, event.values[0], null)
-        } else if (event.sensor.type == Sensor.TYPE_STEP_DETECTOR) {
-            NativeStepManager.processSingleStepDetectorEvent(null)
+            val todaySteps = NativeStepManager.processCumulativeStep(this, event.values[0], null)
+            notificationManager.notify(NOTIFICATION_ID, buildNotification(todaySteps))
         }
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        resetIdleTimer()
         return START_STICKY
     }
 
     override fun onDestroy() {
         super.onDestroy()
         isServiceRunning = false
-        idleHandler.removeCallbacks(idleRunnable)
         sensorManager.unregisterListener(this)
-        Log.d("PacePulseService", "Background service stopped. Battery preserved.")
+        Log.d("PacePulseService", "Background service destroyed.")
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -112,10 +97,9 @@ class StepTrackingService : Service(), SensorEventListener {
                 "PacePulse Step Tracker",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Smart motion step tracking listener"
+                description = "24/7 background step tracking listener"
             }
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
+            notificationManager.createNotificationChannel(channel)
         }
     }
 }
