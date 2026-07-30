@@ -263,42 +263,99 @@ export async function loginUserInDb(email, password) {
 }
 
 /**
- * Validate if a target user exists in Firebase Database
+ * Validate if a target user exists in Firebase Database (Multi-Field Search)
  */
 export async function validateUserExistsInDb(searchQuery) {
-  const clean = searchQuery.trim().toLowerCase().replace('@', '');
+  const rawInput = searchQuery.trim();
+  const clean = rawInput.toLowerCase().replace('@', '');
   if (!clean) return { exists: false, error: 'Please enter a valid User ID / Tag (e.g. @Nevil3), email, or name.' };
 
-  const uid = `usr_${clean.replace(/[^a-z0-9]/g, '_')}`;
+  const docUid = `usr_${clean.replace(/[^a-z0-9]/g, '_')}`;
 
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 6000);
 
-    const res = await fetch(`${FIRESTORE_REST_BASE}/users/${uid}`, { signal: controller.signal }).catch(() => null);
-    clearTimeout(timeoutId);
-
-    if (res && res.ok) {
-      const docData = await res.json();
+    // 1. Direct Document ID check (usr_...)
+    const directRes = await fetch(`${FIRESTORE_REST_BASE}/users/${docUid}`, { signal: controller.signal }).catch(() => null);
+    if (directRes && directRes.ok) {
+      const docData = await directRes.json();
       if (docData && docData.fields) {
         const f = docData.fields;
-        const fetchedEmail = f.email ? f.email.stringValue : `${clean}@example.com`;
-        const fetchedTag = f.username ? f.username.stringValue : `@${clean}`;
-
         return {
           exists: true,
           targetUser: {
-            uid: f.uid ? f.uid.stringValue : uid,
+            uid: f.uid ? f.uid.stringValue : docUid,
             displayName: f.displayName ? f.displayName.stringValue : clean,
-            email: fetchedEmail,
-            username: fetchedTag
+            email: f.email ? f.email.stringValue : `${clean}@example.com`,
+            username: f.username ? f.username.stringValue : `@${clean}`
           }
         };
       }
     }
+
+    // 2. Scan /users collection to match username, email, displayName, or prefix
+    const listRes = await fetch(`${FIRESTORE_REST_BASE}/users`, { signal: controller.signal }).catch(() => null);
+    clearTimeout(timeoutId);
+
+    if (listRes && listRes.ok) {
+      const data = await listRes.json();
+      if (data.documents && Array.isArray(data.documents)) {
+        for (const doc of data.documents) {
+          if (doc.fields) {
+            const f = doc.fields;
+            const docEmail = (f.email?.stringValue || '').toLowerCase();
+            const docUsername = (f.username?.stringValue || '').toLowerCase().replace('@', '');
+            const docName = (f.displayName?.stringValue || '').toLowerCase();
+            const docUidVal = (f.uid?.stringValue || '').toLowerCase();
+            const emailPrefix = docEmail.split('@')[0];
+
+            if (
+              docUsername === clean ||
+              docEmail === clean ||
+              emailPrefix === clean ||
+              docName === clean ||
+              docUidVal === docUid
+            ) {
+              const docId = doc.name.split('/').pop();
+              return {
+                exists: true,
+                targetUser: {
+                  uid: f.uid ? f.uid.stringValue : docId,
+                  displayName: f.displayName ? f.displayName.stringValue : clean,
+                  email: f.email ? f.email.stringValue : `${clean}@example.com`,
+                  username: f.username ? f.username.stringValue : `@${clean}`
+                }
+              };
+            }
+          }
+        }
+      }
+    }
   } catch (e) {}
 
-  return { exists: false, error: `No user found with Tag/ID "${searchQuery}" in Cloud Database. Please check the spelling.` };
+  // 3. Fallback: Check local accounts
+  const localAccounts = getLocalDbAccounts();
+  for (const emailKey in localAccounts) {
+    const acc = localAccounts[emailKey];
+    const accTag = (acc.username || '').toLowerCase().replace('@', '');
+    const accEmail = (acc.email || '').toLowerCase();
+    const accPrefix = accEmail.split('@')[0];
+
+    if (accTag === clean || accEmail === clean || accPrefix === clean) {
+      return {
+        exists: true,
+        targetUser: {
+          uid: acc.uid,
+          displayName: acc.displayName || acc.profile?.name || clean,
+          email: acc.email,
+          username: acc.username || `@${accPrefix}`
+        }
+      };
+    }
+  }
+
+  return { exists: false, error: `No user found matching "${searchQuery}" in Cloud Database. Please check the spelling.` };
 }
 
 /**

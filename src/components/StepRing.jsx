@@ -36,12 +36,11 @@ export function StepRing({
     }}>
       {/* Top Action Buttons (Reset, Instant Sync & Share) */}
       <div style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: '20px',
-        flexWrap: 'wrap',
-        gap: '8px'
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(105px, 1fr))',
+        gap: '8px',
+        width: '100%',
+        marginBottom: '20px'
       }}>
         <button
           onClick={onOpenResetModal}
