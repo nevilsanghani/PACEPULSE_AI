@@ -118,8 +118,8 @@ export function StepRing({
       )}
 
       {/* Ring & Counter Container */}
-      <div style={{ position: 'relative', width: `${size}px`, height: `${size}px`, margin: '0 auto 28px' }}>
-        <svg width={size} height={size} style={{ transform: 'rotate(-90deg)', filter: 'drop-shadow(0 0 15px rgba(0, 242, 254, 0.3))' }}>
+      <div style={{ position: 'relative', width: '100%', maxWidth: `${size}px`, aspectRatio: '1', margin: '0 auto 28px' }}>
+        <svg viewBox={`0 0 ${size} ${size}`} style={{ width: '100%', height: '100%', transform: 'rotate(-90deg)', filter: 'drop-shadow(0 0 15px rgba(0, 242, 254, 0.3))' }}>
           <defs>
             <linearGradient id="stepGradient" x1="0%" y1="0%" x2="100%" y2="100%">
               <stop offset="0%" stopColor="#00F2FE" />
