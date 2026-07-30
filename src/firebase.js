@@ -1,9 +1,34 @@
 /**
- * PacePulse AI - Firebase Firestore REST API Service
+ * PacePulse AI - Pure Firebase Cloud Firestore Database Auth Service
  */
 
 const FIRESTORE_PROJECT_ID = 'pacepulse-ai';
 const FIRESTORE_REST_BASE = `https://firestore.googleapis.com/v1/projects/${FIRESTORE_PROJECT_ID}/databases/(default)/documents`;
+
+/**
+ * Local Account Cache Purge Helper
+ */
+export function getLocalDbAccounts() {
+  try {
+    return JSON.parse(localStorage.getItem('pacepulse_accounts') || '{}');
+  } catch (e) {
+    return {};
+  }
+}
+
+export function saveLocalDbAccounts(accounts) {
+  try {
+    localStorage.setItem('pacepulse_accounts', JSON.stringify(accounts));
+  } catch (e) {}
+}
+
+export function purgeLocalDbAccount(email) {
+  try {
+    const accounts = getLocalDbAccounts();
+    delete accounts[email.trim().toLowerCase()];
+    saveLocalDbAccounts(accounts);
+  } catch (e) {}
+}
 
 /**
  * Save Daily Step Log to Firestore Database (Includes 24 Hourly Buckets!)
@@ -39,7 +64,7 @@ export async function saveDailyLogsToDb(uid, dateStr, totalSteps, goal, calories
     };
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 4000);
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
 
     const res = await fetch(`${FIRESTORE_REST_BASE}/users/${uid}/daily_logs/${dateStr}`, {
       method: 'PATCH',
@@ -57,70 +82,28 @@ export async function saveDailyLogsToDb(uid, dateStr, totalSteps, goal, calories
 }
 
 /**
- * Helper: Universal Multi-Method Firestore User Lookup (Direct ID + Structured Queries)
- */
-async function findUserDocumentInFirestore(queryStr) {
-  const clean = queryStr.trim().toLowerCase().replace('@', '');
-  if (!clean) return null;
-
-  // Method 1: Direct Document ID Lookup (e.g. usr_nevil_gmail_com)
-  const docUid = `usr_${clean.replace(/[^a-z0-9]/g, '_')}`;
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3000);
-    const res = await fetch(`${FIRESTORE_REST_BASE}/users/${docUid}`, { signal: controller.signal }).catch(() => null);
-    clearTimeout(timeoutId);
-
-    if (res && res.ok) {
-      const doc = await res.json();
-      if (doc && doc.fields) return { docId: docUid, fields: doc.fields };
-    }
-  } catch (e) {}
-
-  // Method 2: Firestore Collection Scan (Find by email, username or prefix)
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3500);
-
-    const res = await fetch(`${FIRESTORE_REST_BASE}/users`, { signal: controller.signal }).catch(() => null);
-    clearTimeout(timeoutId);
-
-    if (res && res.ok) {
-      const data = await res.json();
-      if (data.documents && Array.isArray(data.documents)) {
-        for (const doc of data.documents) {
-          if (doc.fields) {
-            const f = doc.fields;
-            const docEmail = (f.email?.stringValue || '').toLowerCase();
-            const docUsername = (f.username?.stringValue || '').toLowerCase().replace('@', '');
-            const docUidVal = (f.uid?.stringValue || '').toLowerCase();
-            const docPrefix = docEmail.split('@')[0];
-
-            if (docEmail === clean || docUsername === clean || docPrefix === clean || docUidVal === docUid) {
-              const parts = doc.name.split('/');
-              return { docId: parts[parts.length - 1], fields: f };
-            }
-          }
-        }
-      }
-    }
-  } catch (e) {}
-
-  return null;
-}
-
-/**
- * Register User in Firebase Cloud Firestore Database ('users' collection)
+ * Register User EXCLUSIVELY in Firebase Cloud Firestore Database ('users' collection)
  */
 export async function registerUserInDb(email, password, displayName, profile) {
   const cleanEmail = email.trim().toLowerCase();
+  const cleanPassword = password.trim();
   const uid = `usr_${cleanEmail.replace(/[^a-z0-9]/g, '_')}`;
   const todayStr = new Date().toISOString().split('T')[0];
 
-  // Check if account already exists
-  const existingDoc = await findUserDocumentInFirestore(cleanEmail);
-  if (existingDoc) {
-    throw new Error('An account with this email address already exists in Firebase. Please sign in instead.');
+  // 1. Always check Cloud Firestore Database first for existing email
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
+    const checkRes = await fetch(`${FIRESTORE_REST_BASE}/users/${uid}`, { signal: controller.signal }).catch(() => null);
+    clearTimeout(timeoutId);
+
+    if (checkRes && checkRes.ok) {
+      throw new Error('An account with this email address already exists in the Cloud Database. Please sign in instead.');
+    }
+  } catch (err) {
+    if (err.message && err.message.includes('already exists')) {
+      throw err;
+    }
   }
 
   // Generate Unique Handle/Tag e.g. @nevil3
@@ -139,110 +122,144 @@ export async function registerUserInDb(email, password, displayName, profile) {
     displayName: displayName.trim(),
     email: cleanEmail,
     username,
-    password: password.trim(),
+    password: cleanPassword,
     createdAt: new Date().toISOString(),
     profile: fullProfile
   };
 
-  // Direct Firebase Firestore User Document Creation
-  try {
-    const firestoreBody = {
-      fields: {
-        uid: { stringValue: uid },
-        displayName: { stringValue: displayName.trim() },
-        email: { stringValue: cleanEmail },
-        username: { stringValue: username },
-        password: { stringValue: password.trim() },
-        createdAt: { stringValue: userData.createdAt },
-        profile: {
-          mapValue: {
-            fields: {
-              name: { stringValue: displayName.trim() },
-              email: { stringValue: cleanEmail },
-              username: { stringValue: username },
-              gender: { stringValue: profile.gender || 'male' },
-              birthDate: { stringValue: profile.birthDate || '2000-01-01' },
-              age: { integerValue: String(profile.age || 25) },
-              heightCm: { doubleValue: Number(profile.heightCm || 175) },
-              weightKg: { doubleValue: Number(profile.weightKg || 70) },
-              dailyGoal: { integerValue: String(profile.dailyGoal || 10000) }
-            }
+  // 2. Direct Cloud Firestore User Document Creation
+  const firestoreBody = {
+    fields: {
+      uid: { stringValue: uid },
+      displayName: { stringValue: displayName.trim() },
+      email: { stringValue: cleanEmail },
+      username: { stringValue: username },
+      password: { stringValue: cleanPassword },
+      createdAt: { stringValue: userData.createdAt },
+      profile: {
+        mapValue: {
+          fields: {
+            name: { stringValue: displayName.trim() },
+            email: { stringValue: cleanEmail },
+            username: { stringValue: username },
+            gender: { stringValue: profile.gender || 'male' },
+            birthDate: { stringValue: profile.birthDate || '2000-01-01' },
+            age: { integerValue: String(profile.age || 25) },
+            heightCm: { doubleValue: Number(profile.heightCm || 175) },
+            weightKg: { doubleValue: Number(profile.weightKg || 70) },
+            dailyGoal: { integerValue: String(profile.dailyGoal || 10000) }
           }
         }
       }
-    };
+    }
+  };
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 4000);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 6000);
 
-    await fetch(`${FIRESTORE_REST_BASE}/users/${uid}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(firestoreBody),
-      signal: controller.signal
-    }).catch(() => null);
+  const createRes = await fetch(`${FIRESTORE_REST_BASE}/users/${uid}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(firestoreBody),
+    signal: controller.signal
+  }).catch(() => null);
 
-    clearTimeout(timeoutId);
+  clearTimeout(timeoutId);
 
-    const emptyHourly = Array.from({ length: 24 }, (_, i) => ({
-      hour: i,
-      label: `${i.toString().padStart(2, '0')}:00`,
-      steps: 0
-    }));
+  if (!createRes || !createRes.ok) {
+    throw new Error('Cloud Database registration failed. Please check your internet connection and try again.');
+  }
 
-    await saveDailyLogsToDb(uid, todayStr, 0, profile.dailyGoal || 10000, null, emptyHourly);
-  } catch (e) {}
+  // Cache locally for offline convenience
+  const localAccounts = getLocalDbAccounts();
+  localAccounts[cleanEmail] = userData;
+  saveLocalDbAccounts(localAccounts);
+
+  const emptyHourly = Array.from({ length: 24 }, (_, i) => ({
+    hour: i,
+    label: `${i.toString().padStart(2, '0')}:00`,
+    steps: 0
+  }));
+
+  await saveDailyLogsToDb(uid, todayStr, 0, profile.dailyGoal || 10000, null, emptyHourly);
 
   return userData;
 }
 
 /**
- * Sign In User with Direct Multi-Method Firebase Cloud Firestore Database Lookup
+ * Sign In User EXCLUSIVELY with Cloud Firestore Database Lookup
  */
 export async function loginUserInDb(email, password) {
   const cleanEmail = email.trim().toLowerCase();
   const cleanPassword = password.trim();
+  const uid = `usr_${cleanEmail.replace(/[^a-z0-9]/g, '_')}`;
 
-  const found = await findUserDocumentInFirestore(cleanEmail);
+  // Direct Cloud Firestore Database Lookup
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
 
-  if (!found) {
-    return { 
-      success: false, 
-      error: 'No account found with this email in Firebase. Please check your credentials or click "Create New Account".' 
-    };
-  }
+    const res = await fetch(`${FIRESTORE_REST_BASE}/users/${uid}`, { signal: controller.signal }).catch(() => null);
+    clearTimeout(timeoutId);
 
-  const f = found.fields;
-  const pFields = f.profile && f.profile.mapValue ? f.profile.mapValue.fields : {};
-  const rawTag = cleanEmail.split('@')[0].replace(/[^a-z0-9]/g, '');
-
-  const dbPassword = f.password ? f.password.stringValue : '';
-
-  if (dbPassword && dbPassword !== cleanPassword) {
-    return { success: false, error: 'Incorrect password. Please try again.' };
-  }
-
-  const fetchedUser = {
-    uid: f.uid ? f.uid.stringValue : found.docId,
-    displayName: f.displayName ? f.displayName.stringValue : cleanEmail.split('@')[0],
-    email: f.email ? f.email.stringValue : cleanEmail,
-    username: f.username ? f.username.stringValue : `@${rawTag}`,
-    password: dbPassword,
-    createdAt: f.createdAt ? f.createdAt.stringValue : new Date().toISOString(),
-    profile: {
-      name: pFields.name ? pFields.name.stringValue : (f.displayName ? f.displayName.stringValue : cleanEmail.split('@')[0]),
-      email: f.email ? f.email.stringValue : cleanEmail,
-      username: f.username ? f.username.stringValue : `@${rawTag}`,
-      gender: pFields.gender ? pFields.gender.stringValue : 'male',
-      birthDate: pFields.birthDate ? pFields.birthDate.stringValue : '2000-01-01',
-      age: pFields.age ? Number(pFields.age.integerValue || 25) : 25,
-      heightCm: pFields.heightCm ? Number(pFields.heightCm.doubleValue || 175) : 175,
-      weightKg: pFields.weightKg ? Number(pFields.weightKg.doubleValue || 70) : 70,
-      dailyGoal: pFields.dailyGoal ? Number(pFields.dailyGoal.integerValue || 10000) : 10000
+    // If 404: Account DOES NOT EXIST in Database! Purge local storage cache.
+    if (res && res.status === 404) {
+      purgeLocalDbAccount(cleanEmail);
+      return { 
+        success: false, 
+        error: 'No account found with this email in Cloud Database. Account may have been removed or does not exist.' 
+      };
     }
-  };
 
-  return { success: true, user: fetchedUser };
+    if (res && res.ok) {
+      const docData = await res.json();
+      if (docData && docData.fields) {
+        const f = docData.fields;
+        const pFields = f.profile && f.profile.mapValue ? f.profile.mapValue.fields : {};
+        const rawTag = cleanEmail.split('@')[0].replace(/[^a-z0-9]/g, '');
+
+        const dbPassword = f.password ? f.password.stringValue : '';
+
+        if (dbPassword && dbPassword !== cleanPassword) {
+          return { success: false, error: 'Incorrect password. Please try again.' };
+        }
+
+        const fetchedUser = {
+          uid: f.uid ? f.uid.stringValue : uid,
+          displayName: f.displayName ? f.displayName.stringValue : cleanEmail.split('@')[0],
+          email: f.email ? f.email.stringValue : cleanEmail,
+          username: f.username ? f.username.stringValue : `@${rawTag}`,
+          password: dbPassword,
+          createdAt: f.createdAt ? f.createdAt.stringValue : new Date().toISOString(),
+          profile: {
+            name: pFields.name ? pFields.name.stringValue : cleanEmail.split('@')[0],
+            email: cleanEmail,
+            username: f.username ? f.username.stringValue : `@${rawTag}`,
+            gender: pFields.gender ? pFields.gender.stringValue : 'male',
+            birthDate: pFields.birthDate ? pFields.birthDate.stringValue : '2000-01-01',
+            age: pFields.age ? Number(pFields.age.integerValue || 25) : 25,
+            heightCm: pFields.heightCm ? Number(pFields.heightCm.doubleValue || 175) : 175,
+            weightKg: pFields.weightKg ? Number(pFields.weightKg.doubleValue || 70) : 70,
+            dailyGoal: pFields.dailyGoal ? Number(pFields.dailyGoal.integerValue || 10000) : 10000
+          }
+        };
+
+        // Sync fresh database user to local storage
+        const localAccounts = getLocalDbAccounts();
+        localAccounts[cleanEmail] = fetchedUser;
+        saveLocalDbAccounts(localAccounts);
+
+        return { success: true, user: fetchedUser };
+      }
+    }
+  } catch (e) {
+    return { success: false, error: 'Database network error. Please check your internet connection and try again.' };
+  }
+
+  return { 
+    success: false, 
+    error: 'No account found with this email in Cloud Database. Please click "Create New Account" to register.' 
+  };
 }
 
 /**
@@ -252,25 +269,36 @@ export async function validateUserExistsInDb(searchQuery) {
   const clean = searchQuery.trim().toLowerCase().replace('@', '');
   if (!clean) return { exists: false, error: 'Please enter a valid User ID / Tag (e.g. @Nevil3), email, or name.' };
 
-  const found = await findUserDocumentInFirestore(clean);
+  const uid = `usr_${clean.replace(/[^a-z0-9]/g, '_')}`;
 
-  if (found) {
-    const f = found.fields;
-    const fetchedEmail = f.email ? f.email.stringValue : `${clean}@example.com`;
-    const fetchedTag = f.username ? f.username.stringValue : `@${clean}`;
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
 
-    return {
-      exists: true,
-      targetUser: {
-        uid: f.uid ? f.uid.stringValue : found.docId,
-        displayName: f.displayName ? f.displayName.stringValue : clean,
-        email: fetchedEmail,
-        username: fetchedTag
+    const res = await fetch(`${FIRESTORE_REST_BASE}/users/${uid}`, { signal: controller.signal }).catch(() => null);
+    clearTimeout(timeoutId);
+
+    if (res && res.ok) {
+      const docData = await res.json();
+      if (docData && docData.fields) {
+        const f = docData.fields;
+        const fetchedEmail = f.email ? f.email.stringValue : `${clean}@example.com`;
+        const fetchedTag = f.username ? f.username.stringValue : `@${clean}`;
+
+        return {
+          exists: true,
+          targetUser: {
+            uid: f.uid ? f.uid.stringValue : uid,
+            displayName: f.displayName ? f.displayName.stringValue : clean,
+            email: fetchedEmail,
+            username: fetchedTag
+          }
+        };
       }
-    };
-  }
+    }
+  } catch (e) {}
 
-  return { exists: false, error: `No user found with Tag/ID "${searchQuery}" in Firebase. Please check the spelling.` };
+  return { exists: false, error: `No user found with Tag/ID "${searchQuery}" in Cloud Database. Please check the spelling.` };
 }
 
 /**
@@ -504,7 +532,7 @@ export async function getDailyLogsFromDb(uid) {
 
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 4000);
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
 
     const res = await fetch(`${FIRESTORE_REST_BASE}/users/${uid}/daily_logs`, { signal: controller.signal }).catch(() => null);
     clearTimeout(timeoutId);
