@@ -1,5 +1,5 @@
 /**
- * PacePulse AI - Pure Firebase Cloud Firestore Database Auth Service
+ * PacePulse AI - Pure Firebase Cloud Firestore Database & Real-Time Sync Service
  */
 
 const FIRESTORE_PROJECT_ID = 'pacepulse-ai';
@@ -373,7 +373,7 @@ export async function sendFriendRequestInDb(senderUser, targetUser) {
   const outgoingObj = {
     id: reqId,
     toUid: targetUid,
-    toName: targetUser.displayName,
+    toName: targetUser.displayName || targetUser.name || 'Friend',
     toEmail: targetUser.email,
     sentAt: new Date().toISOString()
   };
@@ -387,18 +387,17 @@ export async function sendFriendRequestInDb(senderUser, targetUser) {
     sentAt: new Date().toISOString()
   };
 
+  // 1. Store Outgoing Request locally for Sender
   try {
     const outKey = `pacepulse_outgoing_${senderUid}`;
     const outSaved = JSON.parse(localStorage.getItem(outKey) || '[]');
-    outSaved.push(outgoingObj);
-    localStorage.setItem(outKey, JSON.stringify(outSaved));
-
-    const inKey = `pacepulse_pending_${targetUid}`;
-    const inSaved = JSON.parse(localStorage.getItem(inKey) || '[]');
-    inSaved.push(pendingObj);
-    localStorage.setItem(inKey, JSON.stringify(inSaved));
+    if (!outSaved.some(r => r.toUid === targetUid)) {
+      outSaved.push(outgoingObj);
+      localStorage.setItem(outKey, JSON.stringify(outSaved));
+    }
   } catch (e) {}
 
+  // 2. AWAIT Direct Cloud Firestore Write to Receiver's pending_requests subcollection!
   try {
     const firestoreBody = {
       fields: {
@@ -411,11 +410,23 @@ export async function sendFriendRequestInDb(senderUser, targetUser) {
       }
     };
 
-    fetch(`${FIRESTORE_REST_BASE}/users/${targetUid}/pending_requests/${reqId}`, {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+    const res = await fetch(`${FIRESTORE_REST_BASE}/users/${targetUid}/pending_requests/${reqId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(firestoreBody)
-    }).catch(() => {});
+      body: JSON.stringify(firestoreBody),
+      signal: controller.signal
+    }).catch(() => null);
+
+    clearTimeout(timeoutId);
+
+    if (res && res.ok) {
+      console.log(`✅ Friend Request successfully saved in Cloud Firestore for receiver '${targetUid}'!`);
+    } else {
+      console.error(`⚠️ Cloud Firestore pending_request write returned: ${res ? res.status : 'Network error'}`);
+    }
   } catch (e) {}
 
   return outgoingObj;
@@ -428,7 +439,12 @@ export async function getPendingRequestsFromDb(uid) {
   const localSaved = JSON.parse(localStorage.getItem(pendingKey) || '[]');
 
   try {
-    const res = await fetch(`${FIRESTORE_REST_BASE}/users/${uid}/pending_requests`).catch(() => null);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
+
+    const res = await fetch(`${FIRESTORE_REST_BASE}/users/${uid}/pending_requests`, { signal: controller.signal }).catch(() => null);
+    clearTimeout(timeoutId);
+
     if (res && res.ok) {
       const data = await res.json();
       if (data.documents && Array.isArray(data.documents)) {
@@ -510,23 +526,29 @@ export async function acceptFriendRequestInDb(currentUser, reqItem) {
   declineFriendRequestInDb(myUid, reqItem.id);
 
   try {
-    fetch(`${FIRESTORE_REST_BASE}/users/${myUid}/friends/${reqItem.fromUid}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fields: { id: { stringValue: reqItem.fromUid }, name: { stringValue: reqItem.name }, email: { stringValue: reqItem.email } } })
-    }).catch(() => {});
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
 
-    fetch(`${FIRESTORE_REST_BASE}/users/${reqItem.fromUid}/friends/${myUid}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fields: { id: { stringValue: myUid }, name: { stringValue: myName }, email: { stringValue: myEmail } } })
-    }).catch(() => {});
-  } catch (e) {}
+    await Promise.all([
+      fetch(`${FIRESTORE_REST_BASE}/users/${myUid}/friends/${reqItem.fromUid}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fields: { id: { stringValue: reqItem.fromUid }, name: { stringValue: reqItem.name }, email: { stringValue: reqItem.email } } }),
+        signal: controller.signal
+      }).catch(() => {}),
+      fetch(`${FIRESTORE_REST_BASE}/users/${reqItem.fromUid}/friends/${myUid}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fields: { id: { stringValue: myUid }, name: { stringValue: myName }, email: { stringValue: myEmail } } }),
+        signal: controller.signal
+      }).catch(() => {}),
+      fetch(`${FIRESTORE_REST_BASE}/users/${myUid}/pending_requests/${reqItem.id}`, {
+        method: 'DELETE',
+        signal: controller.signal
+      }).catch(() => {})
+    ]);
 
-  try {
-    await fetch(`${FIRESTORE_REST_BASE}/users/${myUid}/pending_requests/${reqItem.id}`, {
-      method: 'DELETE'
-    });
+    clearTimeout(timeoutId);
   } catch (e) {}
 
   return myFriends;

@@ -139,7 +139,14 @@ export default function App() {
   };
 
   useEffect(() => {
+    if (!user || user.uid === 'guest') return;
     refreshPendingRequests();
+
+    const intervalId = setInterval(() => {
+      refreshPendingRequests();
+    }, 12000);
+
+    return () => clearInterval(intervalId);
   }, [user]);
 
   const isEveningGoalWarning = new Date().getHours() >= 20 && totalDailySteps < profile.dailyGoal;
