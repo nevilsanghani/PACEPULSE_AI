@@ -37,6 +37,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     private lateinit var sensorManager: SensorManager
     private var stepCounterSensor: Sensor? = null
 
+    inner class AndroidStepBridge {
         @JavascriptInterface
         fun setActiveUser(uid: String?) {
             Log.d("PacePulseBridge", "setActiveUser called: $uid")
