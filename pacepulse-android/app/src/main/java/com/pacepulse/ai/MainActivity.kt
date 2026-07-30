@@ -93,7 +93,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             settings.allowFileAccess = true
             settings.allowContentAccess = true
             settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-            settings.cacheMode = WebSettings.LOAD_DEFAULT
+            settings.cacheMode = WebSettings.LOAD_NO_CACHE
 
             addJavascriptInterface(AndroidStepBridge(), "AndroidStepBridge")
 
@@ -108,6 +108,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
                     NativeStepManager.syncTodayStepsToWebView(this@MainActivity, webView)
+                    PacePulseWidgetHelper.updateAllWidgets(this@MainActivity)
                 }
 
                 override fun onReceivedError(

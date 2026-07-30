@@ -1,34 +1,9 @@
 /**
- * PacePulse AI - Firebase Firestore REST API Service & Local Storage Sync Engine
+ * PacePulse AI - Firebase Firestore REST API Service
  */
 
 const FIRESTORE_PROJECT_ID = 'pacepulse-ai';
 const FIRESTORE_REST_BASE = `https://firestore.googleapis.com/v1/projects/${FIRESTORE_PROJECT_ID}/databases/(default)/documents`;
-
-// Helper: Read Local DB Accounts
-export function getLocalDbAccounts() {
-  try {
-    const raw = localStorage.getItem('pacepulse_db_accounts');
-    return raw ? JSON.parse(raw) : {};
-  } catch (e) {
-    return {};
-  }
-}
-
-// Helper: Save Local DB Accounts
-export function saveLocalDbAccounts(accounts) {
-  try {
-    localStorage.setItem('pacepulse_db_accounts', JSON.stringify(accounts));
-  } catch (e) {}
-}
-
-// Helper: Purge Stale Local DB Accounts
-export function purgeLocalDbAccount(email) {
-  const accounts = getLocalDbAccounts();
-  const cleanEmail = email.trim().toLowerCase();
-  delete accounts[cleanEmail];
-  saveLocalDbAccounts(accounts);
-}
 
 /**
  * Save Daily Step Log to Firestore Database (Includes 24 Hourly Buckets!)
@@ -63,44 +38,43 @@ export async function saveDailyLogsToDb(uid, dateStr, totalSteps, goal, calories
       }
     };
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 4000);
+
     const res = await fetch(`${FIRESTORE_REST_BASE}/users/${uid}/daily_logs/${dateStr}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(firestoreBody)
-    });
+      body: JSON.stringify(firestoreBody),
+      signal: controller.signal
+    }).catch(() => null);
 
-    if (res.ok) {
-      console.log(`✅ Daily Log for ${dateStr} with 24 hourly buckets saved to Firestore 'users/${uid}/daily_logs'!`);
+    clearTimeout(timeoutId);
+
+    if (res && res.ok) {
+      console.log(`✅ Daily Log for ${dateStr} saved to Firestore 'users/${uid}/daily_logs'!`);
     }
-  } catch (e) {
-    console.warn("Daily log Firestore sync warning:", e);
-  }
+  } catch (e) {}
 }
 
 /**
  * Register User in Firebase Cloud Firestore Database ('users' collection)
- * Enforces 1 account per email & verifies with Firestore to purge deleted accounts
+ * Fast, direct Firebase Firestore authentication only.
  */
 export async function registerUserInDb(email, password, displayName, profile) {
   const cleanEmail = email.trim().toLowerCase();
   const uid = `usr_${cleanEmail.replace(/[^a-z0-9]/g, '_')}`;
   const todayStr = new Date().toISOString().split('T')[0];
 
-  const accounts = getLocalDbAccounts();
-
-  // 1. Verify with Cloud Firestore REST API if user exists or was deleted
+  // 1. Direct Firebase Firestore check
   try {
-    const checkRes = await fetch(`${FIRESTORE_REST_BASE}/users/${uid}`).catch(() => null);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 4000);
+
+    const checkRes = await fetch(`${FIRESTORE_REST_BASE}/users/${uid}`, { signal: controller.signal }).catch(() => null);
+    clearTimeout(timeoutId);
+
     if (checkRes && checkRes.ok) {
-      // Document actively exists in Firestore!
-      throw new Error('An account with this email address already exists. Please sign in instead.');
-    } else if (checkRes && checkRes.status === 404) {
-      // Document was deleted from Firestore! Purge stale local cache automatically.
-      delete accounts[cleanEmail];
-      saveLocalDbAccounts(accounts);
-    } else if (accounts[cleanEmail]) {
-      // Offline fallback: local account exists
-      throw new Error('An account with this email address already exists. Please sign in instead.');
+      throw new Error('An account with this email address already exists in Firebase. Please sign in instead.');
     }
   } catch (err) {
     if (err.message && err.message.includes('already exists')) {
@@ -129,9 +103,7 @@ export async function registerUserInDb(email, password, displayName, profile) {
     profile: fullProfile
   };
 
-  accounts[cleanEmail] = userData;
-  saveLocalDbAccounts(accounts);
-
+  // Direct Firebase Firestore User Document Creation
   try {
     const firestoreBody = {
       fields: {
@@ -159,11 +131,17 @@ export async function registerUserInDb(email, password, displayName, profile) {
       }
     };
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 4000);
+
     await fetch(`${FIRESTORE_REST_BASE}/users/${uid}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(firestoreBody)
-    });
+      body: JSON.stringify(firestoreBody),
+      signal: controller.signal
+    }).catch(() => null);
+
+    clearTimeout(timeoutId);
 
     const emptyHourly = Array.from({ length: 24 }, (_, i) => ({
       hour: i,
@@ -178,23 +156,24 @@ export async function registerUserInDb(email, password, displayName, profile) {
 }
 
 /**
- * Sign In User with Firebase Cloud Firestore Database Lookup
+ * Sign In User with Direct Firebase Cloud Firestore Database Lookup
  */
 export async function loginUserInDb(email, password) {
   const cleanEmail = email.trim().toLowerCase();
   const cleanPassword = password.trim();
+  const uid = `usr_${cleanEmail.replace(/[^a-z0-9]/g, '_')}`;
 
-  // Always check Firestore REST API directly first to handle deleted accounts
   try {
-    const uid = `usr_${cleanEmail.replace(/[^a-z0-9]/g, '_')}`;
-    const res = await fetch(`${FIRESTORE_REST_BASE}/users/${uid}`).catch(() => null);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 4000);
+
+    const res = await fetch(`${FIRESTORE_REST_BASE}/users/${uid}`, { signal: controller.signal }).catch(() => null);
+    clearTimeout(timeoutId);
 
     if (res && res.status === 404) {
-      // Document was deleted in Firestore! Purge local cache.
-      purgeLocalDbAccount(cleanEmail);
       return { 
         success: false, 
-        error: 'No account found with this email. Account may have been removed.' 
+        error: 'No account found with this email in Firebase. Please check your email or click "Create New Account".' 
       };
     }
 
@@ -205,12 +184,18 @@ export async function loginUserInDb(email, password) {
         const pFields = f.profile && f.profile.mapValue ? f.profile.mapValue.fields : {};
         const rawTag = cleanEmail.split('@')[0].replace(/[^a-z0-9]/g, '');
 
+        const dbPassword = f.password ? f.password.stringValue : '';
+
+        if (dbPassword && dbPassword !== cleanPassword) {
+          return { success: false, error: 'Incorrect password. Please try again.' };
+        }
+
         const fetchedUser = {
           uid: f.uid ? f.uid.stringValue : uid,
           displayName: f.displayName ? f.displayName.stringValue : cleanEmail.split('@')[0],
           email: f.email ? f.email.stringValue : cleanEmail,
           username: f.username ? f.username.stringValue : `@${rawTag}`,
-          password: f.password ? f.password.stringValue : '',
+          password: dbPassword,
           createdAt: f.createdAt ? f.createdAt.stringValue : new Date().toISOString(),
           profile: {
             name: pFields.name ? pFields.name.stringValue : cleanEmail.split('@')[0],
@@ -225,39 +210,21 @@ export async function loginUserInDb(email, password) {
           }
         };
 
-        const accounts = getLocalDbAccounts();
-        accounts[cleanEmail] = fetchedUser;
-        saveLocalDbAccounts(accounts);
-
-        if (fetchedUser.password === cleanPassword) {
-          return { success: true, user: fetchedUser };
-        } else {
-          return { success: false, error: 'Incorrect password. Please try again.' };
-        }
+        return { success: true, user: fetchedUser };
       }
     }
-  } catch (e) {}
-
-  // Local DB Fallback
-  const accounts = getLocalDbAccounts();
-  const localUser = accounts[cleanEmail];
-
-  if (localUser) {
-    if (localUser.password === cleanPassword) {
-      return { success: true, user: localUser };
-    } else {
-      return { success: false, error: 'Incorrect password. Please try again.' };
-    }
+  } catch (e) {
+    return { success: false, error: 'Firebase network error. Please try again.' };
   }
 
   return { 
     success: false, 
-    error: 'No account found with this email. Please check your credentials or click "Create New Account".' 
+    error: 'No account found with this email in Firebase. Click "Create New Account" to register.' 
   };
 }
 
 /**
- * Validate if a target user exists in Firebase Database by Unique Tag (@username), email, or displayName
+ * Validate if a target user exists in Firebase Database
  */
 export async function validateUserExistsInDb(searchQuery) {
   const clean = searchQuery.trim().toLowerCase().replace('@', '');
@@ -265,13 +232,14 @@ export async function validateUserExistsInDb(searchQuery) {
 
   const uid = `usr_${clean.replace(/[^a-z0-9]/g, '_')}`;
 
-  // Check Cloud Firestore 'users' directly to ensure fresh state
   try {
-    const res = await fetch(`${FIRESTORE_REST_BASE}/users/${uid}`).catch(() => null);
-    if (res && res.status === 404) {
-      // User was deleted in Firestore
-      purgeLocalDbAccount(clean);
-    } else if (res && res.ok) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 4000);
+
+    const res = await fetch(`${FIRESTORE_REST_BASE}/users/${uid}`, { signal: controller.signal }).catch(() => null);
+    clearTimeout(timeoutId);
+
+    if (res && res.ok) {
       const docData = await res.json();
       if (docData && docData.fields) {
         const f = docData.fields;
@@ -291,37 +259,11 @@ export async function validateUserExistsInDb(searchQuery) {
     }
   } catch (e) {}
 
-  // Check local registered accounts DB
-  const accounts = getLocalDbAccounts();
-  const matchedLocalKey = Object.keys(accounts).find(emailKey => {
-    const acc = accounts[emailKey];
-    const dName = (acc.displayName || '').toLowerCase();
-    const eMail = (acc.email || '').toLowerCase();
-    const uName = (acc.username || acc.profile?.username || '').toLowerCase().replace('@', '');
-    const prefix = eMail.split('@')[0];
-
-    return eMail === clean || dName === clean || uName === clean || prefix === clean;
-  });
-
-  if (matchedLocalKey) {
-    const target = accounts[matchedLocalKey];
-    const targetTag = target.username || target.profile?.username || `@${target.email.split('@')[0]}`;
-    return {
-      exists: true,
-      targetUser: {
-        uid: target.uid,
-        displayName: target.displayName || target.email.split('@')[0],
-        email: target.email,
-        username: targetTag
-      }
-    };
-  }
-
-  return { exists: false, error: `No user found with Tag/ID "${searchQuery}". Please check the spelling.` };
+  return { exists: false, error: `No user found with Tag/ID "${searchQuery}" in Firebase. Please check the spelling.` };
 }
 
 /**
- * 2-Way Friend Request Cloud Firestore Sync & User-Scoped Storage
+ * 2-Way Friend Request Cloud Firestore Sync
  */
 export async function sendFriendRequestInDb(senderUser, targetUser) {
   const senderUid = senderUser.uid || `usr_${senderUser.email.replace(/[^a-z0-9]/g, '_')}`;
@@ -332,7 +274,6 @@ export async function sendFriendRequestInDb(senderUser, targetUser) {
   const targetUid = targetUser.uid;
   const reqId = `req_${Date.now()}`;
 
-  // Outgoing payload for Sender
   const outgoingObj = {
     id: reqId,
     toUid: targetUid,
@@ -341,7 +282,6 @@ export async function sendFriendRequestInDb(senderUser, targetUser) {
     sentAt: new Date().toISOString()
   };
 
-  // Incoming payload for Target User
   const pendingObj = {
     id: reqId,
     fromUid: senderUid,
@@ -351,7 +291,6 @@ export async function sendFriendRequestInDb(senderUser, targetUser) {
     sentAt: new Date().toISOString()
   };
 
-  // 1. Save into user-scoped Local Storage
   try {
     const outKey = `pacepulse_outgoing_${senderUid}`;
     const outSaved = JSON.parse(localStorage.getItem(outKey) || '[]');
@@ -364,7 +303,6 @@ export async function sendFriendRequestInDb(senderUser, targetUser) {
     localStorage.setItem(inKey, JSON.stringify(inSaved));
   } catch (e) {}
 
-  // 2. Sync to Cloud Firestore REST API
   try {
     const firestoreBody = {
       fields: {
@@ -373,64 +311,56 @@ export async function sendFriendRequestInDb(senderUser, targetUser) {
         name: { stringValue: senderName },
         email: { stringValue: senderEmail },
         username: { stringValue: senderTag },
-        sentAt: { stringValue: pendingObj.sentAt }
+        sentAt: { stringValue: new Date().toISOString() }
       }
     };
-    await fetch(`${FIRESTORE_REST_BASE}/users/${targetUid}/pending_requests/${reqId}`, {
+
+    fetch(`${FIRESTORE_REST_BASE}/users/${targetUid}/pending_requests/${reqId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(firestoreBody)
-    });
+    }).catch(() => {});
   } catch (e) {}
 
   return outgoingObj;
 }
 
-/**
- * Fetch Pending Connection Requests sent TO a user
- */
 export async function getPendingRequestsFromDb(uid) {
   if (!uid || uid === 'guest') return [];
 
-  const inKey = `pacepulse_pending_${uid}`;
-  let localRequests = [];
-  try {
-    localRequests = JSON.parse(localStorage.getItem(inKey) || '[]');
-  } catch (e) {}
+  const pendingKey = `pacepulse_pending_${uid}`;
+  const localSaved = JSON.parse(localStorage.getItem(pendingKey) || '[]');
 
   try {
     const res = await fetch(`${FIRESTORE_REST_BASE}/users/${uid}/pending_requests`).catch(() => null);
     if (res && res.ok) {
       const data = await res.json();
       if (data.documents && Array.isArray(data.documents)) {
-        const remote = data.documents.map(doc => {
+        const remoteList = data.documents.map(doc => {
           const f = doc.fields;
           return {
             id: f.id ? f.id.stringValue : doc.name.split('/').pop(),
             fromUid: f.fromUid ? f.fromUid.stringValue : '',
             name: f.name ? f.name.stringValue : 'Friend',
             email: f.email ? f.email.stringValue : '',
-            username: f.username ? f.username.stringValue : '',
-            sentAt: f.sentAt ? f.sentAt.stringValue : ''
+            username: f.username ? f.username.stringValue : '@user',
+            sentAt: f.sentAt ? f.sentAt.stringValue : new Date().toISOString()
           };
         });
 
-        // Merge remote & local deduplicated by id
         const mergedMap = new Map();
-        [...localRequests, ...remote].forEach(r => mergedMap.set(r.id, r));
-        const finalArr = Array.from(mergedMap.values());
-        localStorage.setItem(inKey, JSON.stringify(finalArr));
-        return finalArr;
+        [...localSaved, ...remoteList].forEach(item => mergedMap.set(item.id, item));
+        const mergedList = Array.from(mergedMap.values());
+
+        localStorage.setItem(pendingKey, JSON.stringify(mergedList));
+        return mergedList;
       }
     }
   } catch (e) {}
 
-  return localRequests;
+  return localSaved;
 }
 
-/**
- * Fetch Outgoing Requests sent BY a user
- */
 export function getOutgoingRequestsFromDb(uid) {
   if (!uid || uid === 'guest') return [];
   const outKey = `pacepulse_outgoing_${uid}`;
@@ -441,15 +371,13 @@ export function getOutgoingRequestsFromDb(uid) {
   }
 }
 
-/**
- * Accept Friend Request (2-Way Connection)
- */
 export async function acceptFriendRequestInDb(currentUser, reqItem) {
   const myUid = currentUser.uid || `usr_${currentUser.email.replace(/[^a-z0-9]/g, '_')}`;
-  const senderUid = reqItem.fromUid;
+  const myName = currentUser.displayName || currentUser.profile?.name || currentUser.email.split('@')[0];
+  const myEmail = currentUser.email;
 
-  const myFriendEntry = {
-    id: senderUid,
+  const friendObjForMe = {
+    id: reqItem.fromUid,
     name: reqItem.name,
     email: reqItem.email,
     username: reqItem.username,
@@ -457,44 +385,48 @@ export async function acceptFriendRequestInDb(currentUser, reqItem) {
     connectedAt: new Date().toISOString()
   };
 
-  // 1. Update my local connected friends list
-  const friendsKey = `pacepulse_friends_${myUid}`;
-  const myFriends = JSON.parse(localStorage.getItem(friendsKey) || '[]');
-  if (!myFriends.some(f => f.id === senderUid)) {
-    myFriends.push(myFriendEntry);
-    localStorage.setItem(friendsKey, JSON.stringify(myFriends));
+  const friendObjForTarget = {
+    id: myUid,
+    name: myName,
+    email: myEmail,
+    username: currentUser.username || `@${myEmail.split('@')[0]}`,
+    status: 'connected',
+    connectedAt: new Date().toISOString()
+  };
+
+  const myFriendsKey = `pacepulse_friends_${myUid}`;
+  const myFriends = JSON.parse(localStorage.getItem(myFriendsKey) || '[]');
+  if (!myFriends.some(f => f.id === reqItem.fromUid)) {
+    myFriends.push(friendObjForMe);
+    localStorage.setItem(myFriendsKey, JSON.stringify(myFriends));
   }
 
-  // 2. Remove from my pending requests
-  const pendingKey = `pacepulse_pending_${myUid}`;
-  const myPending = JSON.parse(localStorage.getItem(pendingKey) || '[]');
-  const newPending = myPending.filter(r => r.id !== reqItem.id);
-  localStorage.setItem(pendingKey, JSON.stringify(newPending));
-
-  // 3. Remove from sender's outgoing requests & add me to sender's friends list
-  if (senderUid) {
-    const outKey = `pacepulse_outgoing_${senderUid}`;
-    const senderOut = JSON.parse(localStorage.getItem(outKey) || '[]');
-    const newSenderOut = senderOut.filter(r => r.id !== reqItem.id);
-    localStorage.setItem(outKey, JSON.stringify(newSenderOut));
-
-    const senderFriendsKey = `pacepulse_friends_${senderUid}`;
-    const senderFriends = JSON.parse(localStorage.getItem(senderFriendsKey) || '[]');
-    const meEntry = {
-      id: myUid,
-      name: currentUser.displayName || currentUser.profile?.name || currentUser.email.split('@')[0],
-      email: currentUser.email,
-      username: currentUser.username || `@${currentUser.email.split('@')[0]}`,
-      status: 'connected',
-      connectedAt: new Date().toISOString()
-    };
-    if (!senderFriends.some(f => f.id === myUid)) {
-      senderFriends.push(meEntry);
-      localStorage.setItem(senderFriendsKey, JSON.stringify(senderFriends));
+  const friendUid = reqItem.fromUid;
+  if (friendUid) {
+    const friendKey = `pacepulse_friends_${friendUid}`;
+    const friendList = JSON.parse(localStorage.getItem(friendKey) || '[]');
+    if (!friendList.some(f => f.id === myUid)) {
+      friendList.push(friendObjForTarget);
+      localStorage.setItem(friendKey, JSON.stringify(friendList));
     }
   }
 
-  // 4. Clean up Firestore pending request document & sync friends to Firestore
+  declineFriendRequestInDb(myUid, reqItem.id);
+
+  try {
+    fetch(`${FIRESTORE_REST_BASE}/users/${myUid}/friends/${reqItem.fromUid}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields: { id: { stringValue: reqItem.fromUid }, name: { stringValue: reqItem.name }, email: { stringValue: reqItem.email } } })
+    }).catch(() => {});
+
+    fetch(`${FIRESTORE_REST_BASE}/users/${reqItem.fromUid}/friends/${myUid}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields: { id: { stringValue: myUid }, name: { stringValue: myName }, email: { stringValue: myEmail } } })
+    }).catch(() => {});
+  } catch (e) {}
+
   try {
     await fetch(`${FIRESTORE_REST_BASE}/users/${myUid}/pending_requests/${reqItem.id}`, {
       method: 'DELETE'
@@ -504,9 +436,6 @@ export async function acceptFriendRequestInDb(currentUser, reqItem) {
   return myFriends;
 }
 
-/**
- * Decline / Remove Connection Request
- */
 export function declineFriendRequestInDb(uid, reqId) {
   const pendingKey = `pacepulse_pending_${uid}`;
   const saved = JSON.parse(localStorage.getItem(pendingKey) || '[]');
@@ -520,9 +449,6 @@ export function declineFriendRequestInDb(uid, reqId) {
   return updated;
 }
 
-/**
- * Cancel Outgoing Request
- */
 export function cancelOutgoingRequestInDb(uid, reqId) {
   const outKey = `pacepulse_outgoing_${uid}`;
   const saved = JSON.parse(localStorage.getItem(outKey) || '[]');
@@ -531,9 +457,6 @@ export function cancelOutgoingRequestInDb(uid, reqId) {
   return updated;
 }
 
-/**
- * Fetch Connected Friends List for user
- */
 export function getFriendsListFromDb(uid) {
   if (!uid || uid === 'guest') return [];
   const friendsKey = `pacepulse_friends_${uid}`;
@@ -544,16 +467,12 @@ export function getFriendsListFromDb(uid) {
   }
 }
 
-/**
- * Remove Friend (2-Way Connection Removal)
- */
 export function removeFriendInDb(uid, friendId) {
   const friendsKey = `pacepulse_friends_${uid}`;
   const saved = JSON.parse(localStorage.getItem(friendsKey) || '[]');
   const updated = saved.filter(f => f.id !== friendId);
   localStorage.setItem(friendsKey, JSON.stringify(updated));
 
-  // Also remove from target friend's list
   if (friendId) {
     const targetFriendsKey = `pacepulse_friends_${friendId}`;
     const targetSaved = JSON.parse(localStorage.getItem(targetFriendsKey) || '[]');
@@ -569,14 +488,16 @@ export function removeFriendInDb(uid, friendId) {
   return updated;
 }
 
-/**
- * Fetch Daily History Logs from Firestore DB
- */
 export async function getDailyLogsFromDb(uid) {
   if (!uid || uid === 'guest') return [];
 
   try {
-    const res = await fetch(`${FIRESTORE_REST_BASE}/users/${uid}/daily_logs`).catch(() => null);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 4000);
+
+    const res = await fetch(`${FIRESTORE_REST_BASE}/users/${uid}/daily_logs`, { signal: controller.signal }).catch(() => null);
+    clearTimeout(timeoutId);
+
     if (res && res.ok) {
       const data = await res.json();
       if (data.documents && Array.isArray(data.documents)) {
@@ -607,8 +528,5 @@ export async function getDailyLogsFromDb(uid) {
   return [];
 }
 
-/**
- * Firebase Auth Compatibility Stubs
- */
 export const auth = { currentUser: null };
 export async function signOut() { return true; }

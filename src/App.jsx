@@ -304,7 +304,16 @@ export default function App() {
   };
 
   const handleResetBaseline = () => {
-    setHourlyData(generateEmptyHourlyData());
+    const emptyHourly = generateEmptyHourlyData();
+    setHourlyData(emptyHourly);
+    setShowResetModal(false);
+
+    const hourlyKey = getUserKey('pacepulse_hourly');
+    localStorage.setItem(hourlyKey, JSON.stringify(emptyHourly));
+
+    if (user && user.uid !== 'guest') {
+      saveDailyLogsToDb(user.uid, todayStr, 0, profile.dailyGoal, null, emptyHourly);
+    }
 
     if (window.AndroidStepBridge && window.AndroidStepBridge.resetNativeBaseline) {
       window.AndroidStepBridge.resetNativeBaseline();

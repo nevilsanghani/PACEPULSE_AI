@@ -74,14 +74,22 @@ object PacePulseWidgetHelper {
 
         // Update Solid 2x2 Widgets
         val solidComp = ComponentName(context, PacePulseSolidWidget::class.java)
-        for (id in appWidgetManager.getAppWidgetIds(solidComp)) {
+        val solidIds = appWidgetManager.getAppWidgetIds(solidComp)
+        for (id in solidIds) {
             updateSingleWidget(context, appWidgetManager, id, R.layout.pace_pulse_widget_solid)
+        }
+        if (solidIds.isNotEmpty()) {
+            appWidgetManager.notifyAppWidgetViewDataChanged(solidIds, R.id.widget_root)
         }
 
         // Update Glass 2x2 Widgets
         val glassComp = ComponentName(context, PacePulseGlassWidget::class.java)
-        for (id in appWidgetManager.getAppWidgetIds(glassComp)) {
+        val glassIds = appWidgetManager.getAppWidgetIds(glassComp)
+        for (id in glassIds) {
             updateSingleWidget(context, appWidgetManager, id, R.layout.pace_pulse_widget_glass)
+        }
+        if (glassIds.isNotEmpty()) {
+            appWidgetManager.notifyAppWidgetViewDataChanged(glassIds, R.id.widget_root)
         }
     }
 }
