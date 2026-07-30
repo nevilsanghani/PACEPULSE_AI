@@ -31,12 +31,22 @@ export function purgeLocalDbAccount(email) {
 }
 
 /**
- * Save Daily Step Log to Firestore Database
+ * Save Daily Step Log to Firestore Database (Includes 24 Hourly Buckets!)
  */
 export async function saveDailyLogsToDb(uid, dateStr, totalSteps, goal, caloriesData, hourlyData) {
   if (!uid || uid === 'guest') return;
 
   try {
+    const hourlyValues = (hourlyData || []).map(h => ({
+      mapValue: {
+        fields: {
+          hour: { integerValue: String(h.hour || 0) },
+          label: { stringValue: h.label || `${String(h.hour || 0).padStart(2, '0')}:00` },
+          steps: { integerValue: String(h.steps || 0) }
+        }
+      }
+    }));
+
     const firestoreBody = {
       fields: {
         date: { stringValue: dateStr },
@@ -44,7 +54,12 @@ export async function saveDailyLogsToDb(uid, dateStr, totalSteps, goal, calories
         goal: { integerValue: String(goal) },
         activeKcal: { integerValue: String(caloriesData ? caloriesData.activeKcal : 0) },
         distanceKm: { doubleValue: Number(caloriesData ? caloriesData.distanceKm : 0) },
-        updatedAt: { stringValue: new Date().toISOString() }
+        updatedAt: { stringValue: new Date().toISOString() },
+        hourly: {
+          arrayValue: {
+            values: hourlyValues
+          }
+        }
       }
     };
 
@@ -55,7 +70,7 @@ export async function saveDailyLogsToDb(uid, dateStr, totalSteps, goal, calories
     });
 
     if (res.ok) {
-      console.log(`✅ Daily Log for ${dateStr} saved to Firestore 'users/${uid}/daily_logs'!`);
+      console.log(`✅ Daily Log for ${dateStr} with 24 hourly buckets saved to Firestore 'users/${uid}/daily_logs'!`);
     }
   } catch (e) {
     console.warn("Daily log Firestore sync warning:", e);
@@ -567,13 +582,22 @@ export async function getDailyLogsFromDb(uid) {
       if (data.documents && Array.isArray(data.documents)) {
         return data.documents.map(doc => {
           const f = doc.fields;
+          const hourlyArr = f.hourly && f.hourly.arrayValue && f.hourly.arrayValue.values
+            ? f.hourly.arrayValue.values.map(item => ({
+                hour: Number(item.mapValue?.fields?.hour?.integerValue || 0),
+                label: item.mapValue?.fields?.label?.stringValue || '00:00',
+                steps: Number(item.mapValue?.fields?.steps?.integerValue || 0)
+              }))
+            : null;
+
           return {
             date: f.date ? f.date.stringValue : '',
             steps: f.steps ? Number(f.steps.integerValue) : 0,
             goal: f.goal ? Number(f.goal.integerValue) : 10000,
             activeKcal: f.activeKcal ? Number(f.activeKcal.integerValue) : 0,
             distanceKm: f.distanceKm ? Number(f.distanceKm.doubleValue) : 0,
-            completed: (f.steps ? Number(f.steps.integerValue) : 0) >= (f.goal ? Number(f.goal.integerValue) : 10000)
+            completed: (f.steps ? Number(f.steps.integerValue) : 0) >= (f.goal ? Number(f.goal.integerValue) : 10000),
+            hourlyData: hourlyArr
           };
         });
       }
