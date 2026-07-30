@@ -10,13 +10,21 @@ import java.util.Locale
 
 /**
  * PacePulse AI - Absolute 24/7 Hardware Step Counter Engine
- * Per-User Isolated Step Baselines (Account A & Account B carry isolated baselines)
+ * Per-User Isolated Baselines & Biomechanical Anti-Cheat Hand-Shake/Arm-Swing Filtering
  */
 object NativeStepManager {
 
     private const val PREFS_NAME = "pacepulse_hardware_prefs"
     private var activeUid: String = "guest"
     private var lastKnownHardwareTotal: Float = -1f
+
+    // Anti-Cheat & Biomechanical Motion State
+    private var lastStepTimestampMs: Long = 0L
+    private var lastAccelX: Float = 0f
+    private var lastAccelY: Float = 0f
+    private var lastAccelZ: Float = 9.81f
+    private var lastAccelMagnitude: Float = 9.81f
+    private var consecutiveValidStrides: Int = 0
 
     private fun getTodayStr(): String {
         return SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
@@ -25,6 +33,60 @@ object NativeStepManager {
     private fun sanitizeUid(uid: String?): String {
         val clean = (uid ?: "guest").trim().lowercase().replace("[^a-z0-9_]".toRegex(), "_")
         return if (clean.isEmpty()) "guest" else clean
+    }
+
+    @Synchronized
+    fun updateAccelerometer(x: Float, y: Float, z: Float) {
+        lastAccelX = x
+        lastAccelY = y
+        lastAccelZ = z
+        lastAccelMagnitude = Math.sqrt((x * x + y * y + z * z).toDouble()).toFloat()
+    }
+
+    /**
+     * Biomechanical Motion Anti-Cheat Validator
+     * Returns true ONLY IF movement matches real human walking/running locomotion:
+     * 1. Cadence Guard (Rejects rapid hand shaking > 185 SPM / < 320ms per step)
+     * 2. Violent G-Force Guard (Rejects hand shaking exceeding 2.6g / 25.5 m/s^2)
+     * 3. Vertical Impact & Energy Ratio Guard (Rejects standing arm-swings to & fro)
+     */
+    private fun isRealHumanStride(currentTotal: Float): Boolean {
+        val now = System.currentTimeMillis()
+        val timeDeltaMs = now - lastStepTimestampMs
+
+        // 1. Cadence Guard: If steps arrive faster than 320ms apart (over 187 steps/min), it's rapid hand shaking!
+        if (timeDeltaMs in 1..319) {
+            Log.w("PacePulseAntiCheat", "REJECTED: Rapid hand-shaking detected (cadence delta ${timeDeltaMs}ms)")
+            return false
+        }
+
+        // 2. Violent Force Guard: If total magnitude > 25.5 m/s^2 (~2.6g), it's a violent hand shake
+        if (lastAccelMagnitude > 25.5f) {
+            Log.w("PacePulseAntiCheat", "REJECTED: Violent hand-shaking G-force (${lastAccelMagnitude} m/s^2)")
+            return false
+        }
+
+        // 3. Standing Arm-Swing Guard ("To & Fro" movement while standing still)
+        // In real walking, vertical axis (Z or gravity-aligned) has a distinct impact peak of 11.5 - 18.0 m/s^2.
+        // In standing arm swings, horizontal energy (X/Y) is high while vertical impact (Z) is weak or flat.
+        val horizEnergy = lastAccelX * lastAccelX + lastAccelY * lastAccelY
+        val vertEnergy = lastAccelZ * lastAccelZ
+
+        // If standing still and moving arm to-and-fro, horizEnergy dominates vertEnergy (> 3.5x) & vert impact is weak
+        if (horizEnergy > 3.5f * vertEnergy && Math.abs(lastAccelZ) < 11.2f) {
+            Log.w("PacePulseAntiCheat", "REJECTED: Standing arm-swing to & fro detected (horiz: $horizEnergy, vert: $vertEnergy)")
+            return false
+        }
+
+        // Step Cadence Reset: If idle > 3.5s, reset stride continuity buffer
+        if (timeDeltaMs > 3500) {
+            consecutiveValidStrides = 1
+        } else {
+            consecutiveValidStrides++
+        }
+
+        lastStepTimestampMs = now
+        return true
     }
 
     @Synchronized
@@ -60,7 +122,10 @@ object NativeStepManager {
 
     @Synchronized
     fun processCumulativeStep(context: Context, currentTotal: Float, webView: WebView?): Int {
+        val isFirstTime = (lastKnownHardwareTotal < 0f)
+        val rawDelta = if (isFirstTime) 0 else (currentTotal - lastKnownHardwareTotal).toInt()
         lastKnownHardwareTotal = currentTotal
+
         val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val todayStr = getTodayStr()
 
@@ -80,6 +145,16 @@ object NativeStepManager {
                 .putInt(keySteps, 0)
                 .apply()
             Log.d("PacePulseNative", "New Day Baseline Saved: $midnightBaseline for user $activeUid on $todayStr")
+        }
+
+        // Validate step candidate with anti-cheat biomechanics filter!
+        if (!isFirstTime && rawDelta > 0) {
+            if (!isRealHumanStride(currentTotal)) {
+                // Adjust baseline forward so fake hardware steps are discarded!
+                midnightBaseline += rawDelta
+                prefs.edit().putFloat(keyBaseline, midnightBaseline).apply()
+                Log.w("PacePulseAntiCheat", "Discarded $rawDelta fake step(s)! Baseline adjusted to $midnightBaseline")
+            }
         }
 
         // Calculate absolute steps taken today by active user from hardware sensor
@@ -103,7 +178,6 @@ object NativeStepManager {
             Log.w("PacePulseNative", "Widget update warning: ${e.message}")
         }
 
-        Log.d("PacePulseNative", "User: $activeUid | Hardware Total: $currentTotal | Baseline: $midnightBaseline | Today Steps: $todaySteps")
         return todaySteps
     }
 

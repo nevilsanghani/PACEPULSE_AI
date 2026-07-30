@@ -163,6 +163,11 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_FASTEST)
         }
 
+        val accelSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+        accelSensor?.let {
+            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME)
+        }
+
         NativeStepManager.syncTodayStepsToWebView(this, webView)
     }
 
@@ -174,7 +179,9 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     override fun onSensorChanged(event: SensorEvent?) {
         if (event == null) return
 
-        if (event.sensor.type == Sensor.TYPE_STEP_COUNTER) {
+        if (event.sensor.type == Sensor.TYPE_ACCELEROMETER) {
+            NativeStepManager.updateAccelerometer(event.values[0], event.values[1], event.values[2])
+        } else if (event.sensor.type == Sensor.TYPE_STEP_COUNTER) {
             NativeStepManager.processCumulativeStep(this, event.values[0], webView)
         }
     }

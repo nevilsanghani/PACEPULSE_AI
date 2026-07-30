@@ -45,12 +45,16 @@ class StepTrackingService : Service(), SensorEventListener {
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         stepCounterSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
         stepDetectorSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR)
+        val accelSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
 
         stepCounterSensor?.let {
             sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL)
         }
         stepDetectorSensor?.let {
             sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL)
+        }
+        accelSensor?.let {
+            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME)
         }
 
         Log.d("PacePulseService", "24/7 Background Step Tracking Service Active.")
@@ -81,7 +85,9 @@ class StepTrackingService : Service(), SensorEventListener {
     override fun onSensorChanged(event: SensorEvent?) {
         if (event == null) return
 
-        if (event.sensor.type == Sensor.TYPE_STEP_COUNTER) {
+        if (event.sensor.type == Sensor.TYPE_ACCELEROMETER) {
+            NativeStepManager.updateAccelerometer(event.values[0], event.values[1], event.values[2])
+        } else if (event.sensor.type == Sensor.TYPE_STEP_COUNTER) {
             val todaySteps = NativeStepManager.processCumulativeStep(this, event.values[0], null)
             notificationManager.notify(NOTIFICATION_ID, buildNotification(todaySteps))
         }
