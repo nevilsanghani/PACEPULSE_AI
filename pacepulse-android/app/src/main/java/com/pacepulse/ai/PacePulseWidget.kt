@@ -9,9 +9,10 @@ import android.content.Intent
 import android.widget.RemoteViews
 
 /**
- * PacePulse AI - 2 Independent Native Android Home Screen Widgets (>50% Width)
- * 1) PacePulseSolidWidget ("PacePulse Solid Dark")
- * 2) PacePulseGlassWidget ("PacePulse Glass Transparent")
+ * PacePulse AI - 2 Compact Native Android 2x2 Home Screen Widgets
+ * Displays ONLY:
+ * 1) Number of Steps
+ * 2) Calories Burnt
  */
 
 class PacePulseSolidWidget : AppWidgetProvider() {
@@ -47,7 +48,6 @@ object PacePulseWidgetHelper {
     ) {
         val steps = NativeStepManager.getSavedTodaySteps(context)
         val activeKcal = Math.round(steps * 0.04f)
-        val distKm = Math.round((steps * 0.72f) / 10f) / 100f
 
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -60,11 +60,10 @@ object PacePulseWidgetHelper {
         val views = RemoteViews(context.packageName, layoutResId).apply {
             setTextViewText(R.id.widget_steps, "🚶 ${String.format("%,d", steps)}")
             setTextViewText(R.id.widget_calories, "🔥 $activeKcal kcal")
-            setTextViewText(R.id.widget_distance, "📍 $distKm km")
 
             setOnClickPendingIntent(R.id.widget_root, pendingIntent)
-            setOnClickPendingIntent(R.id.widget_title, pendingIntent)
             setOnClickPendingIntent(R.id.widget_steps, pendingIntent)
+            setOnClickPendingIntent(R.id.widget_calories, pendingIntent)
         }
 
         appWidgetManager.updateAppWidget(appWidgetId, views)
@@ -73,13 +72,13 @@ object PacePulseWidgetHelper {
     fun updateAllWidgets(context: Context) {
         val appWidgetManager = AppWidgetManager.getInstance(context)
 
-        // Update Solid Widgets
+        // Update Solid 2x2 Widgets
         val solidComp = ComponentName(context, PacePulseSolidWidget::class.java)
         for (id in appWidgetManager.getAppWidgetIds(solidComp)) {
             updateSingleWidget(context, appWidgetManager, id, R.layout.pace_pulse_widget_solid)
         }
 
-        // Update Glass Widgets
+        // Update Glass 2x2 Widgets
         val glassComp = ComponentName(context, PacePulseGlassWidget::class.java)
         for (id in appWidgetManager.getAppWidgetIds(glassComp)) {
             updateSingleWidget(context, appWidgetManager, id, R.layout.pace_pulse_widget_glass)

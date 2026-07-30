@@ -14,13 +14,41 @@
   font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
 }
 
-* {
+/* Global Box Sizing & Reset */
+*, *::before, *::after {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
 }
 
-body {
+/* Remove transparent blue focus/tap box across all browsers & webviews */
+*, *::before, *::after, button, a, input, select, textarea, [role="button"] {
+  outline: none !important;
+  -webkit-tap-highlight-color: transparent !important;
+}
+
+button:focus, button:active, button:focus-visible,
+a:focus, a:active, a:focus-visible,
+input:focus, input:active {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+/* Tactile Responsive Button Press Micro-Animation */
+button, [role="button"], .btn-primary, .btn-secondary, .btn-subbar-leaderboard {
+  transition: transform 0.12s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.15s ease, opacity 0.15s ease !important;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+button:active, [role="button"]:active, .btn-primary:active, .btn-secondary:active, .btn-subbar-leaderboard:active {
+  transform: scale(0.95) translateY(1px) !important;
+  opacity: 0.88 !important;
+}
+
+html, body, #root {
+  width: 100%;
+  min-height: 100vh;
   background-color: var(--bg-dark);
   color: var(--text-main);
   background-image: 
@@ -28,12 +56,11 @@ body {
     radial-gradient(at 100% 0%, rgba(139, 92, 246, 0.12) 0px, transparent 50%),
     radial-gradient(at 50% 100%, rgba(255, 107, 0, 0.08) 0px, transparent 50%);
   background-attachment: fixed;
-  min-height: 100vh;
   overflow-x: hidden;
 }
 
 /* ===================================================
-   HEADER & NAVBAR DESIGN
+   HEADER & NAVBAR DESIGN (RESTRUCTURED SUB-BAR)
    =================================================== */
 .nav-header {
   position: sticky;
@@ -42,11 +69,22 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 28px;
-  background: rgba(4, 9, 20, 0.82);
+  padding: 14px 24px;
+  background: rgba(4, 9, 20, 0.88);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.nav-subbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 24px;
+  background: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .nav-logo-group {
@@ -90,7 +128,7 @@ body {
 .nav-action-group {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
 }
 
 .nav-streak-pill {
@@ -114,23 +152,6 @@ body {
   font-size: 13px;
   font-weight: 700;
   color: #FB923C;
-}
-
-.nav-user-btn {
-  padding: 8px 14px;
-  font-size: 13px;
-  border-radius: 12px;
-}
-
-.nav-logout-btn {
-  padding: 8px 10px;
-  border-radius: 12px;
-}
-
-.nav-login-btn {
-  padding: 10px 20px;
-  font-size: 13px;
-  border-radius: 12px;
 }
 
 /* Glassmorphism utility */
@@ -170,7 +191,7 @@ body {
   background: linear-gradient(135deg, #00F2FE 0%, #4FACFE 100%);
   color: #040914;
   font-weight: 700;
-  padding: 14px 28px;
+  padding: 12px 24px;
   border-radius: 14px;
   border: none;
   cursor: pointer;
@@ -178,21 +199,15 @@ body {
   align-items: center;
   justify-content: center;
   gap: 10px;
-  font-size: 15px;
+  font-size: 14px;
   box-shadow: 0 8px 25px rgba(0, 242, 254, 0.35);
-  transition: all 0.25s ease;
-}
-
-.btn-primary:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 12px 30px rgba(0, 242, 254, 0.5);
 }
 
 .btn-secondary {
   background: rgba(255, 255, 255, 0.06);
   color: var(--text-main);
   font-weight: 600;
-  padding: 12px 22px;
+  padding: 10px 18px;
   border-radius: 14px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   cursor: pointer;
@@ -200,51 +215,10 @@ body {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  font-size: 14px;
-  transition: all 0.2s ease;
+  font-size: 13px;
 }
 
-.btn-secondary:hover {
-  background: rgba(255, 255, 255, 0.12);
-  border-color: rgba(255, 255, 255, 0.25);
-  transform: translateY(-1px);
-}
-
-.btn-whatsapp {
-  background: linear-gradient(135deg, #25D366 0%, #128C7E 100%);
-  color: #ffffff;
-  font-weight: 700;
-  padding: 14px 24px;
-  border-radius: 14px;
-  border: none;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  font-size: 15px;
-  box-shadow: 0 8px 25px rgba(37, 211, 102, 0.35);
-  transition: all 0.25s ease;
-}
-
-.btn-instagram {
-  background: linear-gradient(45deg, #f09433 0%, #e6683c 25%, #dc2743 50%, #cc2366 75%, #bc1888 100%);
-  color: #ffffff;
-  font-weight: 700;
-  padding: 14px 24px;
-  border-radius: 14px;
-  border: none;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  font-size: 15px;
-  box-shadow: 0 8px 25px rgba(220, 39, 67, 0.35);
-  transition: all 0.25s ease;
-}
-
-/* Animations */
+/* Keyframe Animations */
 @keyframes pulseGlow {
   0% { box-shadow: 0 0 15px rgba(0, 242, 254, 0.2); }
   50% { box-shadow: 0 0 35px rgba(0, 242, 254, 0.6); }
@@ -281,12 +255,12 @@ body {
 }
 
 /* ===================================================
-   LAYOUT & METRICS CARDS GRID
+   DYNAMIC RESPONSIVE MOBILE ALIGNMENT
    =================================================== */
 .dashboard-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
-  gap: 28px;
+  gap: 24px;
   align-items: stretch;
 }
 
@@ -294,7 +268,7 @@ body {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 16px;
-  margin-bottom: 28px;
+  margin-bottom: 24px;
 }
 
 @media (max-width: 960px) {
@@ -308,11 +282,15 @@ body {
   .metrics-cards-grid {
     grid-template-columns: repeat(3, 1fr) !important;
     gap: 8px !important;
-    margin-bottom: 20px !important;
+    margin-bottom: 16px !important;
   }
 
   .nav-header {
     padding: 12px 16px !important;
+  }
+
+  .nav-subbar {
+    padding: 8px 16px !important;
   }
 
   .nav-logo-icon {
@@ -336,21 +314,29 @@ body {
     font-size: 12px !important;
   }
 
-  .nav-user-name {
-    display: none !important;
-  }
-
-  .nav-user-btn {
-    padding: 6px 10px !important;
-  }
-
   main {
-    padding: 16px 12px 40px !important;
-    gap: 20px !important;
+    padding: 16px 12px 60px !important;
+    gap: 16px !important;
   }
 
   .glass-panel {
-    border-radius: 18px !important;
-    padding: 20px 16px !important;
+    border-radius: 20px !important;
+    padding: 18px 14px !important;
+  }
+}
+
+/* Extra Small Screen Adjustments (<380px) */
+@media (max-width: 380px) {
+  .metrics-cards-grid {
+    grid-template-columns: 1fr !important;
+    gap: 8px !important;
+  }
+
+  .nav-header {
+    padding: 10px 12px !important;
+  }
+
+  .nav-subbar {
+    padding: 6px 12px !important;
   }
 }
