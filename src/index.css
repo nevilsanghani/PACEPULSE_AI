@@ -292,8 +292,8 @@ html, body, #root, .app-container {
 
 @media (max-width: 640px) {
   .metrics-cards-grid {
-    grid-template-columns: 1fr !important;
-    gap: 12px !important;
+    grid-template-columns: repeat(3, 1fr) !important;
+    gap: 8px !important;
     margin-bottom: 16px !important;
   }
 
