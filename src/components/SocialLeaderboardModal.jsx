@@ -8,7 +8,8 @@ import {
   declineFriendRequestInDb, 
   cancelOutgoingRequestInDb, 
   getFriendsListFromDb, 
-  removeFriendInDb 
+  removeFriendInDb,
+  getTodayStepsForFriends
 } from '../firebase';
 
 export function SocialLeaderboardModal({ 
@@ -33,6 +34,8 @@ export function SocialLeaderboardModal({
     return getFriendsListFromDb(myUid);
   });
 
+  const [friendsWithLiveSteps, setFriendsWithLiveSteps] = useState([]);
+
   // Incoming Requests sent TO Current Active User
   const [pendingRequests, setPendingRequests] = useState([]);
 
@@ -41,17 +44,25 @@ export function SocialLeaderboardModal({
     return getOutgoingRequestsFromDb(myUid);
   });
 
-  // Fetch fresh pending requests on load & sync badge
+  // Fetch fresh pending requests & friend steps from Cloud Firestore
   useEffect(() => {
     if (!myUid || myUid === 'guest') return;
+
     getPendingRequestsFromDb(myUid).then(reqs => {
       setPendingRequests(reqs);
       if (onUpdatePendingCount) {
         onUpdatePendingCount(reqs.length);
       }
     });
-    setFriendsList(getFriendsListFromDb(myUid));
+
+    const baseFriends = getFriendsListFromDb(myUid);
+    setFriendsList(baseFriends);
     setOutgoingRequests(getOutgoingRequestsFromDb(myUid));
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    getTodayStepsForFriends(baseFriends, todayStr).then(liveFriends => {
+      setFriendsWithLiveSteps(liveFriends);
+    });
   }, [myUid, onUpdatePendingCount]);
 
   // Handle Instagram handle save
@@ -92,9 +103,11 @@ export function SocialLeaderboardModal({
     isMe: true
   };
 
-  const connectedFriends = friendsList.filter(f => f && (f.status === 'connected' || f.id));
+  const connectedFriends = (friendsWithLiveSteps.length > 0 ? friendsWithLiveSteps : friendsList)
+    .filter(f => f && (f.status === 'connected' || f.id));
+
   const leaderboardEntries = [currentUserEntry, ...connectedFriends]
-    .sort((a, b) => b.steps - a.steps);
+    .sort((a, b) => (b.steps || 0) - (a.steps || 0));
 
   // Send 2-Way Friend Request with User Validation
   const handleSendRequest = async (query) => {

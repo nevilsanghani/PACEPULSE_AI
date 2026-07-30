@@ -606,6 +606,57 @@ export function removeFriendInDb(uid, friendId) {
   return updated;
 }
 
+/**
+ * Fetch Today's Steps & Stats for Connected Friends from Cloud Firestore
+ */
+export async function getTodayStepsForFriends(friendsList, dateStr) {
+  if (!Array.isArray(friendsList) || friendsList.length === 0) return [];
+
+  const updatedFriends = await Promise.all(
+    friendsList.map(async (friend) => {
+      if (!friend || !friend.id) return friend;
+
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 4000);
+
+        const res = await fetch(`${FIRESTORE_REST_BASE}/users/${friend.id}/daily_logs/${dateStr}`, {
+          signal: controller.signal
+        }).catch(() => null);
+
+        clearTimeout(timeoutId);
+
+        if (res && res.ok) {
+          const data = await res.json();
+          if (data && data.fields) {
+            const steps = Number(data.fields.steps?.integerValue || 0);
+            const goal = Number(data.fields.goal?.integerValue || 10000);
+            const activeKcal = Number(data.fields.activeKcal?.integerValue || Math.round(steps * 0.04));
+            const distanceKm = Number(data.fields.distanceKm?.doubleValue || Math.round((steps * 0.72) / 10) / 100);
+
+            return {
+              ...friend,
+              steps,
+              goal,
+              kcal: activeKcal,
+              dist: distanceKm
+            };
+          }
+        }
+      } catch (e) {}
+
+      return {
+        ...friend,
+        steps: friend.steps || 0,
+        kcal: friend.kcal || Math.round((friend.steps || 0) * 0.04),
+        dist: friend.dist || Math.round(((friend.steps || 0) * 0.72) / 10) / 100
+      };
+    })
+  );
+
+  return updatedFriends;
+}
+
 export async function getDailyLogsFromDb(uid) {
   if (!uid || uid === 'guest') return [];
 
