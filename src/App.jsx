@@ -263,12 +263,18 @@ export default function App() {
       delete window.syncNativeTodaySteps;
       delete window.addNativeSteps;
     };
-  }, []);
+  }, [user]);
 
-  // Handle Auth Login / Registration
+  // Handle Authentication Success (Switching user or signing in)
   const handleAuthSuccess = async (authenticatedUser) => {
     setUser(authenticatedUser);
     localStorage.setItem('pacepulse_user', JSON.stringify(authenticatedUser));
+
+    const currentUid = authenticatedUser ? authenticatedUser.uid : 'guest';
+
+    if (window.AndroidStepBridge && window.AndroidStepBridge.setActiveUser) {
+      window.AndroidStepBridge.setActiveUser(currentUid);
+    }
 
     const profileKey = getUserKey('pacepulse_profile', authenticatedUser);
 
@@ -290,12 +296,36 @@ export default function App() {
       }
     }
 
+    // Load isolated hourly data for authenticated user
+    const hourlyKey = getUserKey('pacepulse_hourly', authenticatedUser);
+    const savedHourly = localStorage.getItem(hourlyKey);
+    if (savedHourly) {
+      try {
+        const parsed = JSON.parse(savedHourly);
+        if (Array.isArray(parsed) && parsed.length === 24) {
+          setHourlyData(parsed);
+        } else {
+          setHourlyData(generateEmptyHourlyData());
+        }
+      } catch (e) {
+        setHourlyData(generateEmptyHourlyData());
+      }
+    } else {
+      setHourlyData(generateEmptyHourlyData());
+    }
+
     if (authenticatedUser.uid && authenticatedUser.uid !== 'guest') {
       const remoteLogs = await getDailyLogsFromDb(authenticatedUser.uid);
       if (remoteLogs && remoteLogs.length > 0) {
         const historyKey = getUserKey('pacepulse_history', authenticatedUser);
         setWeeklyHistory(remoteLogs);
         localStorage.setItem(historyKey, JSON.stringify(remoteLogs));
+
+        const todayLog = remoteLogs.find(l => l.date === todayStr);
+        if (todayLog && todayLog.hourlyData && Array.isArray(todayLog.hourlyData) && todayLog.hourlyData.length === 24) {
+          setHourlyData(todayLog.hourlyData);
+          localStorage.setItem(hourlyKey, JSON.stringify(todayLog.hourlyData));
+        }
       }
     }
   };
@@ -303,6 +333,9 @@ export default function App() {
   // Sign Out Handler
   const handleSignOut = () => {
     signOut();
+    if (window.AndroidStepBridge && window.AndroidStepBridge.setActiveUser) {
+      window.AndroidStepBridge.setActiveUser('guest');
+    }
     setUser(null);
     localStorage.removeItem('pacepulse_user');
     setProfile(DEFAULT_PROFILE);

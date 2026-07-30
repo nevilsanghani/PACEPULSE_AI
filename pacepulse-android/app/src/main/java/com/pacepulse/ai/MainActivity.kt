@@ -37,7 +37,14 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     private lateinit var sensorManager: SensorManager
     private var stepCounterSensor: Sensor? = null
 
-    inner class AndroidStepBridge {
+        @JavascriptInterface
+        fun setActiveUser(uid: String?) {
+            Log.d("PacePulseBridge", "setActiveUser called: $uid")
+            runOnUiThread {
+                NativeStepManager.setActiveUser(this@MainActivity, uid, webView)
+            }
+        }
+
         @JavascriptInterface
         fun resetNativeBaseline() {
             Log.d("PacePulseBridge", "Reset native baseline called from JavaScript")
