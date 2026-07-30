@@ -9,14 +9,26 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * PacePulse AI - Absolute 24/7 Monotonic Hardware Step Counter Engine
- * Guarantees step counts NEVER decrease and tracks walking 100% accurately per user.
+ * PacePulse AI - Monotonic Hardware Step Counter Engine
+ * Transient Stride Buffer & Heel-Strike Shockwave Anti-Cheat Validation (Option A)
  */
 object NativeStepManager {
 
     private const val PREFS_NAME = "pacepulse_hardware_prefs"
     private var activeUid: String = "guest"
     private var lastKnownHardwareTotal: Float = -1f
+
+    // Anti-Cheat & Biomechanical Motion State
+    private var lastStepTimestampMs: Long = 0L
+    private var lastAccelX: Float = 0f
+    private var lastAccelY: Float = 0f
+    private var lastAccelZ: Float = 9.81f
+    private var lastAccelMagnitude: Float = 9.81f
+
+    // Transient Stride Buffer
+    private var pendingBufferSteps: Int = 0
+    private var consecutiveValidStrides: Int = 0
+    private var recentGroundImpactCount: Int = 0
 
     private fun getTodayStr(): String {
         return SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
@@ -29,7 +41,75 @@ object NativeStepManager {
 
     @Synchronized
     fun updateAccelerometer(x: Float, y: Float, z: Float) {
-        // Reserved for future continuous telemetry
+        lastAccelX = x
+        lastAccelY = y
+        lastAccelZ = z
+        lastAccelMagnitude = Math.sqrt((x * x + y * y + z * z).toDouble()).toFloat()
+
+        // Track vertical ground impact shockwaves (heel strike alignment)
+        if (Math.abs(z) >= 11.2f || lastAccelMagnitude >= 12.0f) {
+            recentGroundImpactCount++
+        }
+    }
+
+    /**
+     * Transient Stride Candidate Validator
+     * Verifies continuous cadence and heel-strike shockwave presence before committing buffer.
+     */
+    private fun validateCandidateStride(rawDelta: Int): Boolean {
+        val now = System.currentTimeMillis()
+        val timeDeltaMs = now - lastStepTimestampMs
+
+        // 1. Cadence Guard: Rapid hand-shaking (> 190 SPM / < 315ms delta)
+        if (timeDeltaMs in 1..314) {
+            Log.w("PacePulseAntiCheat", "REJECTED: Rapid hand-shake cadence (${timeDeltaMs}ms). Buffer cleared.")
+            pendingBufferSteps = 0
+            consecutiveValidStrides = 0
+            recentGroundImpactCount = 0
+            lastStepTimestampMs = now
+            return false
+        }
+
+        // 2. Violent Force Guard: Over 2.6g magnitude
+        if (lastAccelMagnitude > 25.5f) {
+            Log.w("PacePulseAntiCheat", "REJECTED: Violent hand-shaking force (${lastAccelMagnitude} m/s^2). Buffer cleared.")
+            pendingBufferSteps = 0
+            consecutiveValidStrides = 0
+            recentGroundImpactCount = 0
+            lastStepTimestampMs = now
+            return false
+        }
+
+        // 3. Standing Arm-Swing Guard ("To & Fro" motion without vertical shockwave)
+        val horizEnergy = lastAccelX * lastAccelX + lastAccelY * lastAccelY
+        val vertEnergy = lastAccelZ * lastAccelZ
+        if (horizEnergy > 3.8f * vertEnergy && recentGroundImpactCount == 0) {
+            Log.w("PacePulseAntiCheat", "REJECTED: Standing arm-swing to & fro detected. Buffer cleared.")
+            pendingBufferSteps = 0
+            consecutiveValidStrides = 0
+            recentGroundImpactCount = 0
+            lastStepTimestampMs = now
+            return false
+        }
+
+        // Reset buffer if paused for > 3.5s
+        if (timeDeltaMs > 3500) {
+            pendingBufferSteps = 0
+            consecutiveValidStrides = 0
+            recentGroundImpactCount = 0
+        }
+
+        pendingBufferSteps += rawDelta
+        consecutiveValidStrides++
+        lastStepTimestampMs = now
+
+        // Gated Commit: Commit buffer once 3+ valid rhythmic strides are confirmed
+        if (consecutiveValidStrides >= 3) {
+            recentGroundImpactCount = 0
+            return true
+        }
+
+        return false
     }
 
     @Synchronized
@@ -39,6 +119,9 @@ object NativeStepManager {
         val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
         activeUid = newUid
+        pendingBufferSteps = 0
+        consecutiveValidStrides = 0
+        recentGroundImpactCount = 0
         Log.d("PacePulseNative", "Active User Switched To: $activeUid")
 
         val keyBaseline = "baseline_$activeUid"
@@ -65,6 +148,8 @@ object NativeStepManager {
 
     @Synchronized
     fun processCumulativeStep(context: Context, currentTotal: Float, webView: WebView?): Int {
+        val isFirstTime = (lastKnownHardwareTotal < 0f)
+        val rawDelta = if (isFirstTime) 0 else Math.max(0, (currentTotal - lastKnownHardwareTotal).toInt())
         lastKnownHardwareTotal = currentTotal
 
         val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -88,29 +173,35 @@ object NativeStepManager {
             Log.d("PacePulseNative", "New Day Baseline Saved: $midnightBaseline for user $activeUid on $todayStr")
         }
 
-        // Compute absolute steps taken today from hardware sensor
-        val rawTodaySteps = (currentTotal - midnightBaseline).toInt()
-        val calculatedSteps = if (rawTodaySteps < 0) 0 else rawTodaySteps
-
-        // Ensure Monotonicity: Steps MUST NEVER DECREASE!
-        val previousTodaySteps = prefs.getInt(keySteps, 0)
-        val todaySteps = Math.max(previousTodaySteps, calculatedSteps)
-
-        prefs.edit().putInt(keySteps, todaySteps).apply()
-
-        if (webView != null) {
-            webView.post {
-                webView.evaluateJavascript(
-                    "if(window.syncNativeTodaySteps){ window.syncNativeTodaySteps($todaySteps, '$activeUid'); }", null
-                )
+        // Validate stride candidate with Transient Buffer
+        var stepsToCommit = 0
+        if (!isFirstTime && rawDelta > 0) {
+            if (validateCandidateStride(rawDelta)) {
+                stepsToCommit = pendingBufferSteps
+                pendingBufferSteps = 0
             }
         }
 
-        // Update Android Home Screen AppWidgets
-        try {
-            PacePulseWidgetHelper.updateAllWidgets(context)
-        } catch (e: Exception) {
-            Log.w("PacePulseNative", "Widget update warning: ${e.message}")
+        val previousTodaySteps = prefs.getInt(keySteps, 0)
+        val todaySteps = previousTodaySteps + stepsToCommit
+
+        if (stepsToCommit > 0) {
+            prefs.edit().putInt(keySteps, todaySteps).apply()
+
+            if (webView != null) {
+                webView.post {
+                    webView.evaluateJavascript(
+                        "if(window.syncNativeTodaySteps){ window.syncNativeTodaySteps($todaySteps, '$activeUid'); }", null
+                    )
+                }
+            }
+
+            // Update Android Home Screen AppWidgets
+            try {
+                PacePulseWidgetHelper.updateAllWidgets(context)
+            } catch (e: Exception) {
+                Log.w("PacePulseNative", "Widget update warning: ${e.message}")
+            }
         }
 
         return todaySteps
@@ -142,6 +233,10 @@ object NativeStepManager {
         val keyBaseline = "baseline_$activeUid"
         val keyDate = "date_$activeUid"
         val keySteps = "steps_${activeUid}_$todayStr"
+
+        pendingBufferSteps = 0
+        consecutiveValidStrides = 0
+        recentGroundImpactCount = 0
 
         if (lastKnownHardwareTotal >= 0f) {
             prefs.edit()
