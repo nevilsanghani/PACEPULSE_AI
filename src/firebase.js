@@ -436,7 +436,6 @@ export async function getPendingRequestsFromDb(uid) {
   if (!uid || uid === 'guest') return [];
 
   const pendingKey = `pacepulse_pending_${uid}`;
-  const localSaved = JSON.parse(localStorage.getItem(pendingKey) || '[]');
 
   try {
     const controller = new AbortController();
@@ -447,30 +446,31 @@ export async function getPendingRequestsFromDb(uid) {
 
     if (res && res.ok) {
       const data = await res.json();
-      if (data.documents && Array.isArray(data.documents)) {
-        const remoteList = data.documents.map(doc => {
-          const f = doc.fields;
-          return {
-            id: f.id ? f.id.stringValue : doc.name.split('/').pop(),
-            fromUid: f.fromUid ? f.fromUid.stringValue : '',
-            name: f.name ? f.name.stringValue : 'Friend',
-            email: f.email ? f.email.stringValue : '',
-            username: f.username ? f.username.stringValue : '@user',
-            sentAt: f.sentAt ? f.sentAt.stringValue : new Date().toISOString()
-          };
-        });
+      const remoteList = (data.documents && Array.isArray(data.documents))
+        ? data.documents.map(doc => {
+            const f = doc.fields;
+            return {
+              id: f.id ? f.id.stringValue : doc.name.split('/').pop(),
+              fromUid: f.fromUid ? f.fromUid.stringValue : '',
+              name: f.name ? f.name.stringValue : 'Friend',
+              email: f.email ? f.email.stringValue : '',
+              username: f.username ? f.username.stringValue : '@user',
+              sentAt: f.sentAt ? f.sentAt.stringValue : new Date().toISOString()
+            };
+          })
+        : [];
 
-        const mergedMap = new Map();
-        [...localSaved, ...remoteList].forEach(item => mergedMap.set(item.id, item));
-        const mergedList = Array.from(mergedMap.values());
-
-        localStorage.setItem(pendingKey, JSON.stringify(mergedList));
-        return mergedList;
-      }
+      // Update local storage directly with authoritative remote list from Cloud Firestore!
+      localStorage.setItem(pendingKey, JSON.stringify(remoteList));
+      return remoteList;
     }
   } catch (e) {}
 
-  return localSaved;
+  try {
+    return JSON.parse(localStorage.getItem(pendingKey) || '[]');
+  } catch (e) {
+    return [];
+  }
 }
 
 export function getOutgoingRequestsFromDb(uid) {
@@ -523,7 +523,8 @@ export async function acceptFriendRequestInDb(currentUser, reqItem) {
     }
   }
 
-  declineFriendRequestInDb(myUid, reqItem.id);
+  // Await removal from pending requests!
+  await declineFriendRequestInDb(myUid, reqItem.id);
 
   try {
     const controller = new AbortController();
@@ -541,10 +542,6 @@ export async function acceptFriendRequestInDb(currentUser, reqItem) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fields: { id: { stringValue: myUid }, name: { stringValue: myName }, email: { stringValue: myEmail } } }),
         signal: controller.signal
-      }).catch(() => {}),
-      fetch(`${FIRESTORE_REST_BASE}/users/${myUid}/pending_requests/${reqItem.id}`, {
-        method: 'DELETE',
-        signal: controller.signal
       }).catch(() => {})
     ]);
 
@@ -554,14 +551,22 @@ export async function acceptFriendRequestInDb(currentUser, reqItem) {
   return myFriends;
 }
 
-export function declineFriendRequestInDb(uid, reqId) {
+export async function declineFriendRequestInDb(uid, reqId) {
   const pendingKey = `pacepulse_pending_${uid}`;
   const saved = JSON.parse(localStorage.getItem(pendingKey) || '[]');
   const updated = saved.filter(r => r.id !== reqId);
   localStorage.setItem(pendingKey, JSON.stringify(updated));
 
   try {
-    fetch(`${FIRESTORE_REST_BASE}/users/${uid}/pending_requests/${reqId}`, { method: 'DELETE' });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
+
+    await fetch(`${FIRESTORE_REST_BASE}/users/${uid}/pending_requests/${reqId}`, {
+      method: 'DELETE',
+      signal: controller.signal
+    }).catch(() => {});
+
+    clearTimeout(timeoutId);
   } catch (e) {}
 
   return updated;
