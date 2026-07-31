@@ -10,10 +10,28 @@ export function WeeklyStepChart({ todaySteps = 0, dailyGoal = 10000, weeklyHisto
   // Combine weekly history logs with today's steps
   const effectiveHistory = (weeklyHistory && weeklyHistory.length > 0) ? weeklyHistory : history;
 
+  // Calculate the 7 calendar dates (Mon -> Sun) for the current active week
+  const now = new Date();
+  const currentDayIdx = (now.getDay() + 6) % 7;
+  const mondayDate = new Date(now);
+  mondayDate.setDate(now.getDate() - currentDayIdx);
+
+  const currentWeekDates = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(mondayDate);
+    d.setDate(mondayDate.getDate() + i);
+    return d.toISOString().split('T')[0];
+  });
+
   const weeklyData = daysOfWeek.map((dayLabel, idx) => {
+    const targetDateStr = currentWeekDates[idx];
     let steps = 0;
+
+    const matchedLog = effectiveHistory.find(item => item && item.date === targetDateStr);
+
     if (idx === todayIndex) {
-      steps = todaySteps;
+      steps = Math.max(todaySteps, matchedLog ? matchedLog.steps || 0 : 0);
+    } else if (matchedLog && typeof matchedLog.steps === 'number') {
+      steps = matchedLog.steps;
     } else if (effectiveHistory[idx] && typeof effectiveHistory[idx].steps === 'number') {
       steps = effectiveHistory[idx].steps;
     } else {
@@ -26,6 +44,7 @@ export function WeeklyStepChart({ todaySteps = 0, dailyGoal = 10000, weeklyHisto
     return {
       index: idx,
       day: dayLabel,
+      dateStr: targetDateStr,
       steps,
       distKm,
       calories,

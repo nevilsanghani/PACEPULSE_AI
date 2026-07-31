@@ -142,12 +142,28 @@ export default function App() {
     if (!user || user.uid === 'guest') return;
     refreshPendingRequests();
 
+    // Fetch remote logs from Cloud Firestore for weekly chart & history
+    getDailyLogsFromDb(user.uid).then(remoteLogs => {
+      if (remoteLogs && remoteLogs.length > 0) {
+        const historyKey = getUserKey('pacepulse_history', user);
+        setWeeklyHistory(remoteLogs);
+        localStorage.setItem(historyKey, JSON.stringify(remoteLogs));
+
+        const todayLog = remoteLogs.find(l => l.date === todayStr);
+        if (todayLog && todayLog.hourlyData && Array.isArray(todayLog.hourlyData) && todayLog.hourlyData.length === 24) {
+          setHourlyData(todayLog.hourlyData);
+          const hourlyKey = getUserKey('pacepulse_hourly', user);
+          localStorage.setItem(hourlyKey, JSON.stringify(todayLog.hourlyData));
+        }
+      }
+    });
+
     const intervalId = setInterval(() => {
       refreshPendingRequests();
     }, 12000);
 
     return () => clearInterval(intervalId);
-  }, [user]);
+  }, [user, todayStr]);
 
   const isEveningGoalWarning = new Date().getHours() >= 20 && totalDailySteps < profile.dailyGoal;
   const hasActiveNotifications = pendingRequestsList.length > 0 || isGoalReached || isEveningGoalWarning;
