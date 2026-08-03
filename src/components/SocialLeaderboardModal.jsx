@@ -7,6 +7,7 @@ import {
   acceptFriendRequestInDb, 
   declineFriendRequestInDb, 
   cancelOutgoingRequestInDb, 
+  getLocalFriendsList,
   getFriendsListFromDb, 
   removeFriendInDb,
   getTodayStepsForFriends
@@ -29,9 +30,9 @@ export function SocialLeaderboardModal({
 
   const myUid = currentUser?.uid || 'guest';
 
-  // Connected Friends List for Current Active User
+  // Connected Friends List for Current Active User (Synchronous init)
   const [friendsList, setFriendsList] = useState(() => {
-    return getFriendsListFromDb(myUid);
+    return getLocalFriendsList(myUid);
   });
 
   const [friendsWithLiveSteps, setFriendsWithLiveSteps] = useState([]);

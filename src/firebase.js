@@ -580,10 +580,21 @@ export function cancelOutgoingRequestInDb(uid, reqId) {
   return updated;
 }
 
+export function getLocalFriendsList(uid) {
+  if (!uid || uid === 'guest') return [];
+  const friendsKey = `pacepulse_friends_${uid}`;
+  try {
+    const saved = localStorage.getItem(friendsKey);
+    return saved ? JSON.parse(saved) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
 export async function getFriendsListFromDb(uid) {
   if (!uid || uid === 'guest') return [];
   const friendsKey = `pacepulse_friends_${uid}`;
-  const localSaved = JSON.parse(localStorage.getItem(friendsKey) || '[]');
+  const localSaved = getLocalFriendsList(uid);
 
   try {
     const controller = new AbortController();

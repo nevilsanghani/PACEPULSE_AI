@@ -61,25 +61,7 @@ export function StepRing({
           <RefreshCw size={14} /> Reset Steps
         </button>
 
-        <button
-          onClick={handleInstantSync}
-          style={{
-            padding: '8px 14px',
-            fontSize: '12px',
-            borderRadius: '12px',
-            background: 'rgba(0, 242, 254, 0.15)',
-            border: '1px solid rgba(0, 242, 254, 0.4)',
-            color: '#00F2FE',
-            fontWeight: 700,
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px'
-          }}
-          title="Query Hardware Sensor Instantly"
-        >
-          <Zap size={14} /> Sync Now
-        </button>
+
 
         <button
           onClick={onOpenShareModal}

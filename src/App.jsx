@@ -103,8 +103,10 @@ export default function App() {
   // Calculate sum of steps from 24 hourly buckets
   const totalDailySteps = hourlyData.reduce((sum, h) => sum + (h.steps || 0), 0);
 
-  // Compute live Calories, Distance & MET Active Time
-  const caloriesData = calculateCalories(totalDailySteps, profile);
+  // Compute live Calories, Distance & MET Active Time (Memoized to prevent render loops)
+  const caloriesData = React.useMemo(() => {
+    return calculateCalories(totalDailySteps, profile);
+  }, [totalDailySteps, profile]);
 
   const isGoalReached = totalDailySteps >= profile.dailyGoal;
 
@@ -233,35 +235,13 @@ export default function App() {
     };
   }, [user]);
 
+  const lastSyncedRef = React.useRef({ steps: -1, date: '', uid: '', goal: -1 });
+
   // Persist hourly data, streak & profile to user-scoped localStorage & Firestore DB
   useEffect(() => {
     const uid = user ? user.uid : 'guest';
     const key = `pacepulse_hourly_${uid}_${todayStr}`;
     localStorage.setItem(key, JSON.stringify(hourlyData));
-
-    if (user && user.uid !== 'guest') {
-      if (navigator.onLine) {
-        setCloudSyncStatus('syncing');
-        saveDailyLogsToDb(
-          user.uid,
-          todayStr,
-          totalDailySteps,
-          profile.dailyGoal,
-          caloriesData,
-          hourlyData
-        ).then(() => setCloudSyncStatus('synced'));
-      } else {
-        queueOfflineDailyLog(
-          user.uid,
-          todayStr,
-          totalDailySteps,
-          profile.dailyGoal,
-          caloriesData,
-          hourlyData
-        );
-        setCloudSyncStatus('offline');
-      }
-    }
 
     // Push live UI metrics directly to Android AppWidget
     if (window.AndroidStepBridge && window.AndroidStepBridge.updateWidgetData) {
@@ -271,6 +251,38 @@ export default function App() {
         caloriesData ? caloriesData.activeKcal || 0 : 0,
         caloriesData ? caloriesData.distanceKm || 0 : 0
       );
+    }
+
+    if (!user || user.uid === 'guest') return;
+
+    // Check if step count or relevant params actually changed since last sync
+    const last = lastSyncedRef.current;
+    if (last.steps === totalDailySteps && last.date === todayStr && last.uid === user.uid && last.goal === profile.dailyGoal) {
+      return; // No change in steps or profile - skip network sync to avoid flickering!
+    }
+
+    lastSyncedRef.current = { steps: totalDailySteps, date: todayStr, uid: user.uid, goal: profile.dailyGoal };
+
+    if (navigator.onLine) {
+      setCloudSyncStatus('syncing');
+      saveDailyLogsToDb(
+        user.uid,
+        todayStr,
+        totalDailySteps,
+        profile.dailyGoal,
+        caloriesData,
+        hourlyData
+      ).then(() => setCloudSyncStatus('synced'));
+    } else {
+      queueOfflineDailyLog(
+        user.uid,
+        todayStr,
+        totalDailySteps,
+        profile.dailyGoal,
+        caloriesData,
+        hourlyData
+      );
+      setCloudSyncStatus('offline');
     }
   }, [hourlyData, user, profile.dailyGoal, totalDailySteps, caloriesData, todayStr]);
 
