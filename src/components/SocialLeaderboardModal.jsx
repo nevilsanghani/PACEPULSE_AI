@@ -45,18 +45,21 @@ export function SocialLeaderboardModal({
     return getOutgoingRequestsFromDb(myUid);
   });
 
-  // Fetch fresh pending requests & friend steps from Cloud Firestore
+  // Fetch fresh pending requests & friend steps from Cloud Firestore with 2.5s real-time polling
   useEffect(() => {
     if (!myUid || myUid === 'guest') return;
 
-    getPendingRequestsFromDb(myUid).then(reqs => {
-      setPendingRequests(reqs);
-      if (onUpdatePendingCount) {
-        onUpdatePendingCount(reqs.length);
-      }
-    });
+    const fetchPending = () => {
+      getPendingRequestsFromDb(myUid).then(reqs => {
+        setPendingRequests(reqs);
+        if (onUpdatePendingCount) {
+          onUpdatePendingCount(reqs.length);
+        }
+      });
+      setOutgoingRequests(getOutgoingRequestsFromDb(myUid));
+    };
 
-    setOutgoingRequests(getOutgoingRequestsFromDb(myUid));
+    fetchPending();
 
     Promise.resolve(getFriendsListFromDb(myUid)).then(baseFriends => {
       const list = Array.isArray(baseFriends) ? baseFriends : [];
@@ -66,6 +69,10 @@ export function SocialLeaderboardModal({
         setFriendsWithLiveSteps(liveFriends);
       });
     });
+
+    const pollInterval = setInterval(fetchPending, 2500);
+
+    return () => clearInterval(pollInterval);
   }, [myUid, onUpdatePendingCount]);
 
   // Handle Instagram handle save

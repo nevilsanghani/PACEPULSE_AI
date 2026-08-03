@@ -17,12 +17,19 @@ export function NotificationModal({
   // Action status tracker for inline button feedback ({ [reqId]: 'approved' | 'rejected' })
   const [requestActionStatus, setRequestActionStatus] = useState({});
 
-  // Mark notifications read when user opens the modal
+  // Mark notifications read & poll for fresh requests when user opens the modal
   useEffect(() => {
     if (onMarkNotificationsRead) {
       onMarkNotificationsRead();
     }
-  }, [onMarkNotificationsRead]);
+    if (onRefreshPendingRequests) {
+      onRefreshPendingRequests();
+      const intervalId = setInterval(() => {
+        onRefreshPendingRequests();
+      }, 2500);
+      return () => clearInterval(intervalId);
+    }
+  }, [onMarkNotificationsRead, onRefreshPendingRequests]);
 
   const handleApproveRequest = async (req) => {
     setRequestActionStatus(prev => ({ ...prev, [req.id]: 'approved' }));
