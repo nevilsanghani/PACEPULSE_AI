@@ -428,11 +428,41 @@ export default function App() {
     setHourlyData(emptyHourly);
     setShowResetModal(false);
 
-    const hourlyKey = getUserKey('pacepulse_hourly');
+    const uid = user ? user.uid : 'guest';
+    const hourlyKey = getUserKey('pacepulse_hourly', user);
     localStorage.setItem(hourlyKey, JSON.stringify(emptyHourly));
 
+    const todayHourlyKey = `pacepulse_hourly_${uid}_${todayStr}`;
+    localStorage.setItem(todayHourlyKey, JSON.stringify(emptyHourly));
+
+    // Reset weekly step progress entry for today to 0
+    setWeeklyHistory(prev => {
+      const list = Array.isArray(prev) ? [...prev] : [];
+      const idx = list.findIndex(item => item && item.date === todayStr);
+      const resetLog = {
+        date: todayStr,
+        steps: 0,
+        goal: profile.dailyGoal || 10000,
+        activeKcal: 0,
+        distanceKm: 0,
+        durationMins: 0,
+        completed: false,
+        hourlyData: emptyHourly
+      };
+
+      if (idx >= 0) {
+        list[idx] = resetLog;
+      } else {
+        list.unshift(resetLog);
+      }
+
+      const historyKey = getUserKey('pacepulse_history', user);
+      localStorage.setItem(historyKey, JSON.stringify(list));
+      return list;
+    });
+
     if (user && user.uid !== 'guest') {
-      saveDailyLogsToDb(user.uid, todayStr, 0, profile.dailyGoal, null, emptyHourly);
+      saveDailyLogsToDb(user.uid, todayStr, 0, profile.dailyGoal, { activeKcal: 0, distanceKm: 0 }, emptyHourly);
     }
 
     if (window.AndroidStepBridge && window.AndroidStepBridge.resetNativeBaseline) {

@@ -47,13 +47,21 @@ export async function saveDailyLogsToDb(uid, dateStr, totalSteps, goal, calories
       }
     }));
 
+    const computedKcal = (caloriesData && typeof caloriesData.activeKcal === 'number' && caloriesData.activeKcal > 0)
+      ? caloriesData.activeKcal
+      : Math.round(totalSteps * 0.04);
+
+    const computedDist = (caloriesData && typeof caloriesData.distanceKm === 'number' && caloriesData.distanceKm > 0)
+      ? caloriesData.distanceKm
+      : Math.round((totalSteps * 0.72) / 10) / 100;
+
     const firestoreBody = {
       fields: {
         date: { stringValue: dateStr },
         steps: { integerValue: String(totalSteps) },
         goal: { integerValue: String(goal) },
-        activeKcal: { integerValue: String(caloriesData ? caloriesData.activeKcal : 0) },
-        distanceKm: { doubleValue: Number(caloriesData ? caloriesData.distanceKm : 0) },
+        activeKcal: { integerValue: String(computedKcal) },
+        distanceKm: { doubleValue: Number(computedDist) },
         updatedAt: { stringValue: new Date().toISOString() },
         hourly: {
           arrayValue: {
@@ -743,21 +751,37 @@ export async function getDailyLogsFromDb(uid) {
       if (data.documents && Array.isArray(data.documents)) {
         return data.documents.map(doc => {
           const f = doc.fields;
-          const hourlyArr = f.hourly && f.hourly.arrayValue && f.hourly.arrayValue.values
+          const stepsVal = f.steps ? Number(f.steps.integerValue || f.steps.doubleValue || 0) : 0;
+          const goalVal = f.goal ? Number(f.goal.integerValue || f.goal.doubleValue || 10000) : 10000;
+          const rawKcal = f.activeKcal ? Number(f.activeKcal.integerValue || f.activeKcal.doubleValue || 0) : 0;
+          const rawDist = f.distanceKm ? Number(f.distanceKm.doubleValue || f.distanceKm.integerValue || 0) : 0;
+
+          const computedKcal = rawKcal > 0 ? rawKcal : Math.round(stepsVal * 0.04);
+          const computedDist = rawDist > 0 ? rawDist : Math.round((stepsVal * 0.72) / 10) / 100;
+
+          let hourlyArr = f.hourly && f.hourly.arrayValue && f.hourly.arrayValue.values
             ? f.hourly.arrayValue.values.map(item => ({
-                hour: Number(item.mapValue?.fields?.hour?.integerValue || 0),
-                label: item.mapValue?.fields?.label?.stringValue || '00:00',
-                steps: Number(item.mapValue?.fields?.steps?.integerValue || 0)
+                hour: Number(item.mapValue?.fields?.hour?.integerValue || item.mapValue?.fields?.hour?.doubleValue || 0),
+                label: item.mapValue?.fields?.label?.stringValue || `${String(item.mapValue?.fields?.hour?.integerValue || 0).padStart(2, '0')}:00`,
+                steps: Number(item.mapValue?.fields?.steps?.integerValue || item.mapValue?.fields?.steps?.doubleValue || 0)
               }))
             : null;
 
+          if (!hourlyArr || hourlyArr.length < 24) {
+            hourlyArr = Array.from({ length: 24 }, (_, i) => ({
+              hour: i,
+              label: `${i.toString().padStart(2, '0')}:00`,
+              steps: 0
+            }));
+          }
+
           return {
             date: f.date ? f.date.stringValue : '',
-            steps: f.steps ? Number(f.steps.integerValue) : 0,
-            goal: f.goal ? Number(f.goal.integerValue) : 10000,
-            activeKcal: f.activeKcal ? Number(f.activeKcal.integerValue) : 0,
-            distanceKm: f.distanceKm ? Number(f.distanceKm.doubleValue) : 0,
-            completed: (f.steps ? Number(f.steps.integerValue) : 0) >= (f.goal ? Number(f.goal.integerValue) : 10000),
+            steps: stepsVal,
+            goal: goalVal,
+            activeKcal: computedKcal,
+            distanceKm: computedDist,
+            completed: stepsVal >= goalVal && stepsVal > 0,
             hourlyData: hourlyArr
           };
         });
