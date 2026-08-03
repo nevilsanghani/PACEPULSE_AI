@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { Calendar, TrendingUp, CheckCircle, Target, Flame, Navigation } from 'lucide-react';
+import { Calendar, TrendingUp, CheckCircle, Target, Flame, Navigation, Clock } from 'lucide-react';
 
-export function WeeklyStepChart({ todaySteps = 0, dailyGoal = 10000, weeklyHistory = [], history = [] }) {
+export function WeeklyStepChart({ todaySteps = 0, dailyGoal = 10000, weeklyHistory = [], history = [], onOpenHistory }) {
   const daysOfWeek = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
   const todayIndex = (new Date().getDay() + 6) % 7; // Convert Sun=0 -> Sun=6
 
@@ -57,7 +57,6 @@ export function WeeklyStepChart({ todaySteps = 0, dailyGoal = 10000, weeklyHisto
   const totalWeeklySteps = weeklyData.reduce((sum, d) => sum + d.steps, 0);
 
   const selectedData = weeklyData[selectedDayIdx] || weeklyData[todayIndex];
-  const selectedGoalPct = Math.min(Math.round((selectedData.steps / dailyGoal) * 100), 999);
 
   return (
     <div className="glass-card" style={{
@@ -94,9 +93,34 @@ export function WeeklyStepChart({ todaySteps = 0, dailyGoal = 10000, weeklyHisto
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: 700, color: '#34D399' }}>
-          <TrendingUp size={16} />
-          <span>Total: {totalWeeklySteps.toLocaleString()} steps</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: 700, color: '#34D399' }}>
+            <TrendingUp size={16} />
+            <span>Total: {totalWeeklySteps.toLocaleString()} steps</span>
+          </div>
+
+          {onOpenHistory && (
+            <button
+              onClick={onOpenHistory}
+              style={{
+                background: 'rgba(0, 242, 254, 0.12)',
+                border: '1px solid rgba(0, 242, 254, 0.35)',
+                borderRadius: '12px',
+                width: '36px',
+                height: '36px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#00F2FE',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease'
+              }}
+              className="hover-card-bright"
+              title="Daily Activity History Logs"
+            >
+              <Clock size={18} color="#00F2FE" />
+            </button>
+          )}
         </div>
       </div>
 

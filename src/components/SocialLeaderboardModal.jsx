@@ -390,7 +390,7 @@ export function SocialLeaderboardModal({
             <div style={{ display: 'flex', gap: '8px' }}>
               <input
                 type="text"
-                placeholder="Search by Unique Tag (e.g. @Nevil3) or Email..."
+                placeholder={`Search by Unique Tag (e.g. ${currentUser?.username || `@${(currentUser?.email || 'user').split('@')[0]}`}) or Email...`}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 style={{

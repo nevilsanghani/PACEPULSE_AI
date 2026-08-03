@@ -490,6 +490,7 @@ export default function App() {
             todaySteps={totalDailySteps}
             dailyGoal={profile.dailyGoal}
             weeklyHistory={weeklyHistory}
+            onOpenHistory={() => setShowHistoryModal(true)}
           />
 
           {/* 24-Hour Breakdown Hourly Chart */}
