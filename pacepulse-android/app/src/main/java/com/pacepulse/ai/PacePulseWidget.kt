@@ -10,9 +10,7 @@ import android.widget.RemoteViews
 
 /**
  * PacePulse AI - 2 Compact Native Android 2x2 Home Screen Widgets
- * Displays ONLY:
- * 1) Number of Steps
- * 2) Calories Burnt
+ * Displays 100% Synced Steps, Calories, and Distance from App UI
  */
 
 class PacePulseSolidWidget : AppWidgetProvider() {
@@ -40,14 +38,30 @@ class PacePulseGlassWidget : AppWidgetProvider() {
 }
 
 object PacePulseWidgetHelper {
+    private const val PREFS_NAME = "pacepulse_widget_prefs"
+
+    fun updateWidgetMetrics(context: Context, steps: Int, goal: Int, activeKcal: Int, distanceKm: Double) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit()
+            .putInt("synced_steps", steps)
+            .putInt("synced_goal", goal)
+            .putInt("synced_kcal", activeKcal)
+            .putFloat("synced_dist", distanceKm.toFloat())
+            .apply()
+
+        updateAllWidgets(context)
+    }
+
     fun updateSingleWidget(
         context: Context,
         appWidgetManager: AppWidgetManager,
         appWidgetId: Int,
         layoutResId: Int
     ) {
-        val steps = NativeStepManager.getSavedTodaySteps(context)
-        val activeKcal = Math.round(steps * 0.04f)
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val steps = prefs.getInt("synced_steps", NativeStepManager.getSavedTodaySteps(context))
+        val activeKcal = prefs.getInt("synced_kcal", Math.round(steps * 0.04f))
+        val distanceKm = prefs.getFloat("synced_dist", Math.round((steps * 0.72f) / 10f) / 100f)
 
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -60,10 +74,12 @@ object PacePulseWidgetHelper {
         val views = RemoteViews(context.packageName, layoutResId).apply {
             setTextViewText(R.id.widget_steps, "🚶 ${String.format("%,d", steps)}")
             setTextViewText(R.id.widget_calories, "🔥 $activeKcal kcal")
+            setTextViewText(R.id.widget_distance, "📍 ${String.format("%.2f", distanceKm)} km")
 
             setOnClickPendingIntent(R.id.widget_root, pendingIntent)
             setOnClickPendingIntent(R.id.widget_steps, pendingIntent)
             setOnClickPendingIntent(R.id.widget_calories, pendingIntent)
+            setOnClickPendingIntent(R.id.widget_distance, pendingIntent)
         }
 
         appWidgetManager.updateAppWidget(appWidgetId, views)

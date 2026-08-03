@@ -18,7 +18,9 @@ import {
   signOut,
   saveDailyLogsToDb,
   getDailyLogsFromDb,
-  getPendingRequestsFromDb
+  getPendingRequestsFromDb,
+  queueOfflineDailyLog,
+  flushOfflineSyncQueue
 } from './firebase';
 import { 
   DEFAULT_PROFILE, 
@@ -68,10 +70,12 @@ export default function App() {
   const [isAudioMuted, setIsMuted] = useState(false);
 
   const todayStr = new Date().toISOString().split('T')[0];
+  const [cloudSyncStatus, setCloudSyncStatus] = useState(navigator.onLine ? 'synced' : 'offline');
 
-  // 24-Hour Step Breakdown Array
+  // 24-Hour Step Breakdown Array (Date-scoped to prevent carrying forward yesterday's steps)
   const [hourlyData, setHourlyData] = useState(() => {
-    const key = user ? getUserKey('pacepulse_hourly', user) : 'pacepulse_hourly_guest';
+    const uid = user ? user.uid : 'guest';
+    const key = `pacepulse_hourly_${uid}_${todayStr}`;
     const saved = localStorage.getItem(key);
     if (saved) {
       try {
@@ -205,19 +209,67 @@ export default function App() {
     }
   }, [totalDailySteps, profile.dailyGoal, isGoalReached, prevGoalReached, lastMilestoneSpoken, caloriesData.activeKcal]);
 
+  // Handle Online / Offline network event listeners
+  useEffect(() => {
+    const handleOnline = () => {
+      setCloudSyncStatus('syncing');
+      if (user && user.uid && user.uid !== 'guest') {
+        flushOfflineSyncQueue(user.uid).then(() => setCloudSyncStatus('synced'));
+      } else {
+        setCloudSyncStatus('synced');
+      }
+    };
+
+    const handleOffline = () => {
+      setCloudSyncStatus('offline');
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [user]);
+
   // Persist hourly data, streak & profile to user-scoped localStorage & Firestore DB
   useEffect(() => {
-    const key = getUserKey('pacepulse_hourly');
+    const uid = user ? user.uid : 'guest';
+    const key = `pacepulse_hourly_${uid}_${todayStr}`;
     localStorage.setItem(key, JSON.stringify(hourlyData));
 
     if (user && user.uid !== 'guest') {
-      saveDailyLogsToDb(
-        user.uid,
-        todayStr,
+      if (navigator.onLine) {
+        setCloudSyncStatus('syncing');
+        saveDailyLogsToDb(
+          user.uid,
+          todayStr,
+          totalDailySteps,
+          profile.dailyGoal,
+          caloriesData,
+          hourlyData
+        ).then(() => setCloudSyncStatus('synced'));
+      } else {
+        queueOfflineDailyLog(
+          user.uid,
+          todayStr,
+          totalDailySteps,
+          profile.dailyGoal,
+          caloriesData,
+          hourlyData
+        );
+        setCloudSyncStatus('offline');
+      }
+    }
+
+    // Push live UI metrics directly to Android AppWidget
+    if (window.AndroidStepBridge && window.AndroidStepBridge.updateWidgetData) {
+      window.AndroidStepBridge.updateWidgetData(
         totalDailySteps,
-        profile.dailyGoal,
-        caloriesData,
-        hourlyData
+        profile.dailyGoal || 10000,
+        caloriesData ? caloriesData.activeKcal || 0 : 0,
+        caloriesData ? caloriesData.distanceKm || 0 : 0
       );
     }
   }, [hourlyData, user, profile.dailyGoal, totalDailySteps, caloriesData, todayStr]);
@@ -404,6 +456,7 @@ export default function App() {
         streakDays={computedStreakDays}
         pendingCount={pendingRequestsList.length}
         hasUnreadDot={hasUnreadDot}
+        cloudSyncStatus={cloudSyncStatus}
       />
 
       {/* Main Content Layout */}

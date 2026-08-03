@@ -580,13 +580,68 @@ export function cancelOutgoingRequestInDb(uid, reqId) {
   return updated;
 }
 
-export function getFriendsListFromDb(uid) {
+export async function getFriendsListFromDb(uid) {
   if (!uid || uid === 'guest') return [];
   const friendsKey = `pacepulse_friends_${uid}`;
+  const localSaved = JSON.parse(localStorage.getItem(friendsKey) || '[]');
+
   try {
-    return JSON.parse(localStorage.getItem(friendsKey) || '[]');
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
+
+    const res = await fetch(`${FIRESTORE_REST_BASE}/users/${uid}/friends`, { signal: controller.signal }).catch(() => null);
+    clearTimeout(timeoutId);
+
+    if (res && res.ok) {
+      const data = await res.json();
+      if (data.documents && Array.isArray(data.documents)) {
+        const remoteFriends = data.documents.map(doc => {
+          const f = doc.fields;
+          return {
+            id: f.id ? f.id.stringValue : doc.name.split('/').pop(),
+            name: f.name ? f.name.stringValue : 'Friend',
+            email: f.email ? f.email.stringValue : '',
+            username: f.username ? f.username.stringValue : '@user',
+            status: 'connected'
+          };
+        });
+
+        localStorage.setItem(friendsKey, JSON.stringify(remoteFriends));
+        return remoteFriends;
+      }
+    }
+  } catch (e) {}
+
+  return localSaved;
+}
+
+export function queueOfflineDailyLog(uid, dateStr, totalSteps, goal, caloriesData, hourlyData) {
+  try {
+    const queueKey = `pacepulse_offline_queue_${uid}`;
+    const existing = JSON.parse(localStorage.getItem(queueKey) || '[]');
+    const item = { uid, dateStr, totalSteps, goal, caloriesData, hourlyData, timestamp: Date.now() };
+    const filtered = existing.filter(i => i.dateStr !== dateStr);
+    filtered.push(item);
+    localStorage.setItem(queueKey, JSON.stringify(filtered));
+  } catch (e) {}
+}
+
+export async function flushOfflineSyncQueue(uid) {
+  if (!uid || uid === 'guest' || !navigator.onLine) return false;
+
+  try {
+    const queueKey = `pacepulse_offline_queue_${uid}`;
+    const queue = JSON.parse(localStorage.getItem(queueKey) || '[]');
+    if (!queue || queue.length === 0) return true;
+
+    for (const item of queue) {
+      await saveDailyLogsToDb(item.uid, item.dateStr, item.totalSteps, item.goal, item.caloriesData, item.hourlyData);
+    }
+
+    localStorage.removeItem(queueKey);
+    return true;
   } catch (e) {
-    return [];
+    return false;
   }
 }
 

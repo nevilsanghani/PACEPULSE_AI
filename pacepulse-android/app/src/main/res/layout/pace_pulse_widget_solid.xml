@@ -4,20 +4,30 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:padding="12dp"
+    android:padding="10dp"
     android:background="@drawable/widget_background_solid"
     android:gravity="center">
+
+    <!-- Header / Brand -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="PacePulse AI"
+        android:textColor="#00F2FE"
+        android:textSize="11sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="4dp" />
 
     <!-- 3D Steps Badge Container -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1"
+        android:layout_weight="1.2"
         android:orientation="vertical"
         android:gravity="center"
         android:background="@drawable/widget_pill_steps"
-        android:padding="6dp"
-        android:layout_marginBottom="6dp">
+        android:padding="4dp"
+        android:layout_marginBottom="4dp">
 
         <TextView
             android:id="@+id/widget_steps"
@@ -25,7 +35,7 @@
             android:layout_height="wrap_content"
             android:text="🚶 0"
             android:textColor="#00F2FE"
-            android:textSize="20sp"
+            android:textSize="18sp"
             android:textStyle="bold"
             android:shadowColor="#8000F2FE"
             android:shadowDx="0"
@@ -34,29 +44,36 @@
             android:gravity="center" />
     </LinearLayout>
 
-    <!-- 3D Calories Badge Container -->
+    <!-- Sub Metrics Container: Calories & Distance -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:orientation="vertical"
+        android:orientation="horizontal"
         android:gravity="center"
         android:background="@drawable/widget_pill_calories"
-        android:padding="6dp">
+        android:padding="4dp">
 
         <TextView
             android:id="@+id/widget_calories"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_weight="1"
             android:text="🔥 0 kcal"
             android:textColor="#FFAA00"
-            android:textSize="14sp"
+            android:textSize="11sp"
             android:textStyle="bold"
-            android:shadowColor="#80FF6B00"
-            android:shadowDx="0"
-            android:shadowDy="2"
-            android:shadowRadius="6"
+            android:gravity="center" />
+
+        <TextView
+            android:id="@+id/widget_distance"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="📍 0.0 km"
+            android:textColor="#38BDF8"
+            android:textSize="11sp"
+            android:textStyle="bold"
             android:gravity="center" />
     </LinearLayout>
-
 </LinearLayout>

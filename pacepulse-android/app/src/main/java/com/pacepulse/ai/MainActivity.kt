@@ -61,6 +61,13 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         }
 
         @JavascriptInterface
+        fun updateWidgetData(steps: Int, goal: Int, activeKcal: Int, distanceKm: Double) {
+            runOnUiThread {
+                PacePulseWidgetHelper.updateWidgetMetrics(this@MainActivity, steps, goal, activeKcal, distanceKm)
+            }
+        }
+
+        @JavascriptInterface
         fun setWidgetStyle(style: String) {
             Log.d("PacePulseBridge", "Set widget style called: $style")
             runOnUiThread {

@@ -6,6 +6,7 @@ export function Navbar({
   streakDays = 0, 
   pendingCount = 0,
   hasUnreadDot = false,
+  cloudSyncStatus = 'synced',
   onOpenAuth,
   onOpenAuthModal,
   onSignOut,
@@ -166,6 +167,39 @@ export function Navbar({
           <Flame size={15} color={streakDays >= 7 ? '#FF6B00' : '#F97316'} className={streakDays >= 7 ? 'float-anim' : ''} />
           <span className="nav-streak-text">
             {streakDays} {streakDays === 1 ? 'Day' : 'Days'} {streakDays >= 7 && '🏆'}
+          </span>
+        </div>
+
+        {/* Live Cloud Sync Status Badge (No Manual Sync Button Required) */}
+        <div style={{
+          fontSize: '11px',
+          fontWeight: '700',
+          padding: '6px 12px',
+          borderRadius: '12px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+          background: cloudSyncStatus === 'offline' 
+            ? 'rgba(249, 115, 22, 0.15)' 
+            : cloudSyncStatus === 'syncing' 
+            ? 'rgba(234, 179, 8, 0.15)' 
+            : 'rgba(16, 185, 129, 0.15)',
+          border: `1px solid ${cloudSyncStatus === 'offline' ? 'rgba(249, 115, 22, 0.4)' : cloudSyncStatus === 'syncing' ? 'rgba(234, 179, 8, 0.4)' : 'rgba(16, 185, 129, 0.4)'}`,
+          color: cloudSyncStatus === 'offline' ? '#FB923C' : cloudSyncStatus === 'syncing' ? '#FACC15' : '#34D399'
+        }}>
+          <div style={{
+            width: '6px',
+            height: '6px',
+            borderRadius: '50%',
+            background: 'currentColor',
+            boxShadow: '0 0 6px currentColor'
+          }} />
+          <span>
+            {cloudSyncStatus === 'offline' 
+              ? 'Offline (Saved Locally)' 
+              : cloudSyncStatus === 'syncing' 
+              ? 'Syncing...' 
+              : 'Synced to Cloud'}
           </span>
         </div>
       </div>

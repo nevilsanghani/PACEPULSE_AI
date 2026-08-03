@@ -55,13 +55,15 @@ export function SocialLeaderboardModal({
       }
     });
 
-    const baseFriends = getFriendsListFromDb(myUid);
-    setFriendsList(baseFriends);
     setOutgoingRequests(getOutgoingRequestsFromDb(myUid));
 
-    const todayStr = new Date().toISOString().split('T')[0];
-    getTodayStepsForFriends(baseFriends, todayStr).then(liveFriends => {
-      setFriendsWithLiveSteps(liveFriends);
+    Promise.resolve(getFriendsListFromDb(myUid)).then(baseFriends => {
+      const list = Array.isArray(baseFriends) ? baseFriends : [];
+      setFriendsList(list);
+      const todayStr = new Date().toISOString().split('T')[0];
+      getTodayStepsForFriends(list, todayStr).then(liveFriends => {
+        setFriendsWithLiveSteps(liveFriends);
+      });
     });
   }, [myUid, onUpdatePendingCount]);
 

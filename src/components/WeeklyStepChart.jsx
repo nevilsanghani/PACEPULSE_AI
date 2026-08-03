@@ -135,15 +135,6 @@ export function WeeklyStepChart({ todaySteps = 0, dailyGoal = 10000, weeklyHisto
           <span style={{ color: '#38BDF8', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '4px' }}>
             <Navigation size={14} /> {selectedData.distKm} km
           </span>
-          <span style={{
-            color: selectedData.isGoalMet ? '#34D399' : '#00F2FE',
-            fontWeight: '800',
-            background: selectedData.isGoalMet ? 'rgba(16, 185, 129, 0.2)' : 'rgba(0, 242, 254, 0.15)',
-            padding: '3px 10px',
-            borderRadius: '10px'
-          }}>
-            {selectedGoalPct}% Goal
-          </span>
         </div>
       </div>
 
