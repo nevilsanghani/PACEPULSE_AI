@@ -314,6 +314,78 @@ export function SocialLeaderboardModal({
         {/* Tab 2: Connections & Outgoing Requests */}
         {activeTab === 'friends' && (
           <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            {/* Incoming Requests Received FROM Other Users */}
+            {pendingRequests.length > 0 && (
+              <div style={{
+                background: 'rgba(239, 68, 68, 0.08)',
+                border: '1px solid rgba(239, 68, 68, 0.25)',
+                borderRadius: '16px',
+                padding: '14px'
+              }}>
+                <div style={{ fontSize: '12px', fontWeight: 800, color: '#EF4444', textTransform: 'uppercase', marginBottom: '10px' }}>
+                  🔔 Connection Requests Received ({pendingRequests.length})
+                </div>
+                {pendingRequests.map(req => (
+                  <div key={req.id} style={{
+                    background: 'rgba(10, 15, 26, 0.8)',
+                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                    borderRadius: '12px',
+                    padding: '12px 14px',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    marginBottom: '8px'
+                  }}>
+                    <div>
+                      <div style={{ fontSize: '14px', fontWeight: 700, color: '#FFFFFF' }}>{req.name}</div>
+                      <div style={{ fontSize: '11px', color: '#9CA3AF' }}>{req.username || req.email}</div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button
+                        onClick={async () => {
+                          await acceptFriendRequestInDb(currentUser || { uid: myUid }, req);
+                          setPendingRequests(prev => prev.filter(r => r.id !== req.id));
+                          Promise.resolve(getFriendsListFromDb(myUid)).then(setFriendsList);
+                          if (onUpdatePendingCount) onUpdatePendingCount();
+                        }}
+                        style={{
+                          padding: '6px 12px',
+                          borderRadius: '8px',
+                          background: 'linear-gradient(135deg, #10B981 0%, #059669 100%)',
+                          border: 'none',
+                          color: 'white',
+                          fontSize: '12px',
+                          fontWeight: '700',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        ✓ Accept
+                      </button>
+                      <button
+                        onClick={async () => {
+                          await declineFriendRequestInDb(myUid, req.id);
+                          setPendingRequests(prev => prev.filter(r => r.id !== req.id));
+                          if (onUpdatePendingCount) onUpdatePendingCount();
+                        }}
+                        style={{
+                          padding: '6px 12px',
+                          borderRadius: '8px',
+                          background: 'rgba(239, 68, 68, 0.2)',
+                          border: '1px solid rgba(239, 68, 68, 0.4)',
+                          color: '#EF4444',
+                          fontSize: '12px',
+                          fontWeight: '700',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        ✕ Reject
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
             {/* Search and Add Friend by Unique Tag (@username) or Email */}
             <div style={{ display: 'flex', gap: '8px' }}>
               <input

@@ -552,6 +552,7 @@ export default function App() {
           currentSteps={totalDailySteps}
           initialTab={socialTab}
           onClose={() => setShowSocialModal(false)}
+          onUpdatePendingCount={refreshPendingRequests}
         />
       )}
 

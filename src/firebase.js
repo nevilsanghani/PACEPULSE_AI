@@ -321,8 +321,8 @@ export async function validateUserExistsInDb(searchQuery) {
               return {
                 exists: true,
                 targetUser: {
-                  uid: f.uid ? f.uid.stringValue : docId,
-                  displayName: f.displayName ? f.displayName.stringValue : clean,
+                  uid: docId,
+                  displayName: f.displayName ? f.displayName.stringValue : (f.name ? f.name.stringValue : clean),
                   email: f.email ? f.email.stringValue : `${clean}@example.com`,
                   username: f.username ? f.username.stringValue : `@${clean}`
                 }

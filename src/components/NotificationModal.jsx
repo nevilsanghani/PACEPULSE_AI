@@ -25,27 +25,20 @@ export function NotificationModal({
   }, [onMarkNotificationsRead]);
 
   const handleApproveRequest = async (req) => {
-    await acceptFriendRequestInDb(user || { uid: myUid }, req);
     setRequestActionStatus(prev => ({ ...prev, [req.id]: 'approved' }));
+    await acceptFriendRequestInDb(user || { uid: myUid }, req);
     if (onRefreshPendingRequests) onRefreshPendingRequests();
   };
 
-  const handleRejectRequest = (reqId) => {
-    declineFriendRequestInDb(myUid, reqId);
+  const handleRejectRequest = async (reqId) => {
     setRequestActionStatus(prev => ({ ...prev, [reqId]: 'rejected' }));
+    await declineFriendRequestInDb(myUid, reqId);
     if (onRefreshPendingRequests) onRefreshPendingRequests();
   };
 
-  // 24-Hour Filter Rule: Filter notifications older than 24h if already acted upon
-  const now = Date.now();
-  const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
-
+  // Filter out any requests that have been acted upon (accepted or rejected)
   const validPendingRequests = pendingRequests.filter(req => {
-    const sentTime = new Date(req.sentAt || Date.now()).getTime();
-    const isRecent = (now - sentTime) < TWENTY_FOUR_HOURS;
-    const isActedUpon = requestActionStatus[req.id];
-    // Show if not acted upon yet, OR if acted upon within the last 24h
-    return !isActedUpon || isRecent;
+    return !requestActionStatus[req.id];
   });
 
   const isGoalReached = currentSteps >= dailyGoal;
