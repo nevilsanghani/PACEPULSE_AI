@@ -24,9 +24,6 @@ export function SocialLeaderboardModal({
   const [activeTab, setActiveTab] = useState(initialTab || 'leaderboard'); 
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
-  const [instaHandle, setInstaHandle] = useState(() => {
-    return localStorage.getItem('pacepulse_insta_handle') || '';
-  });
 
   const myUid = currentUser?.uid || 'guest';
 
@@ -75,38 +72,10 @@ export function SocialLeaderboardModal({
     return () => clearInterval(pollInterval);
   }, [myUid, onUpdatePendingCount]);
 
-  // Handle Instagram handle save
-  const handleSaveInstaHandle = (e) => {
-    e.preventDefault();
-    const cleanHandle = instaHandle.trim().replace('@', '');
-    if (!cleanHandle) return;
-    setInstaHandle(cleanHandle);
-    localStorage.setItem('pacepulse_insta_handle', cleanHandle);
-    alert(`✅ Instagram handle updated to @${cleanHandle}`);
-  };
-
-  const handleUnlinkInstaHandle = () => {
-    setInstaHandle('');
-    localStorage.removeItem('pacepulse_insta_handle');
-    alert('✨ Instagram handle unlinked successfully!');
-  };
-
-  const handleShareInstaInvite = () => {
-    const userTag = currentUser?.username || `@${(currentUser?.email || 'user').split('@')[0]}`;
-    const text = `👟 Join my PacePulse AI Leaderboard! Add my unique user ID: ${userTag}`;
-    if (navigator.share) {
-      navigator.share({ title: 'PacePulse AI Leaderboard', text, url: 'https://pacepulse-ai.web.app' }).catch(() => {});
-    } else {
-      navigator.clipboard.writeText(text);
-      alert('✨ Leaderboard invite copied to clipboard! Share on your Instagram Story or DM so your friends can connect with you!');
-    }
-  };
-
   // Construct real user leaderboard entries (NO DUMMY MOCK USERS!)
   const currentUserEntry = {
     id: myUid,
     name: currentUser?.displayName || currentUser?.profile?.name || currentProfile?.name || 'You (Me)',
-    insta: instaHandle ? `@${instaHandle.replace('@', '')}` : '',
     steps: currentSteps || 0,
     kcal: Math.round(currentSteps * 0.04),
     dist: Math.round((currentSteps * 0.72) / 10) / 100,
@@ -171,6 +140,9 @@ export function SocialLeaderboardModal({
     }
   };
 
+  // Dynamic placeholder showing logged-in user's own unique ID
+  const myTag = currentUser?.username || `@${(currentUser?.email || 'user').split('@')[0]}`;
+
   return (
     <div className="modal-backdrop" style={{
       position: 'fixed',
@@ -205,7 +177,7 @@ export function SocialLeaderboardModal({
               🏆 Social Connections & Leaderboard
             </h2>
             <p style={{ margin: '4px 0 0', fontSize: '13px', color: 'var(--text-dim)' }}>
-              Connect with real verified users via Unique ID (@tag) to compete on steps
+              Connect with real verified users via Unique ID ({myTag}) to compete on steps
             </p>
           </div>
           <button 
@@ -228,7 +200,7 @@ export function SocialLeaderboardModal({
           </button>
         </div>
 
-        {/* Navigation Tabs */}
+        {/* Navigation Tabs (2 tabs only: Leaderboard + Connections) */}
         <div style={{ display: 'flex', borderBottom: '1px solid rgba(255, 255, 255, 0.1)', marginBottom: '16px' }}>
           <button
             onClick={() => setActiveTab('leaderboard')}
@@ -262,22 +234,6 @@ export function SocialLeaderboardModal({
           >
             👥 Connections ({connectedFriends.length})
           </button>
-          <button
-            onClick={() => setActiveTab('instagram')}
-            style={{
-              flex: 1,
-              padding: '12px',
-              background: 'transparent',
-              border: 'none',
-              borderBottom: activeTab === 'instagram' ? '2px solid #e1306c' : 'none',
-              color: activeTab === 'instagram' ? '#f472b6' : 'var(--text-dim)',
-              fontWeight: 700,
-              fontSize: '14px',
-              cursor: 'pointer'
-            }}
-          >
-            📷 Instagram
-          </button>
         </div>
 
         {/* Tab 1: Real Leaderboard */}
@@ -301,7 +257,7 @@ export function SocialLeaderboardModal({
                     </span>
                     <div>
                       <div style={{ fontSize: '15px', fontWeight: 700, color: entry.isMe ? '#60a5fa' : 'var(--text-bright)' }}>
-                        {entry.name} {entry.insta && <span style={{ fontSize: '12px', color: '#f472b6', fontWeight: 500 }}>({entry.insta})</span>} {entry.isMe && '(You)'}
+                        {entry.name} {entry.isMe && '(You)'}
                       </div>
                       <div style={{ fontSize: '12px', color: 'var(--text-dim)', marginTop: '2px' }}>
                         🔥 {(entry.kcal || 0)} active kcal • 📏 {(entry.dist || 0)} km
@@ -397,7 +353,7 @@ export function SocialLeaderboardModal({
             <div style={{ display: 'flex', gap: '8px' }}>
               <input
                 type="text"
-                placeholder={`Search by Unique Tag (e.g. ${currentUser?.username || `@${(currentUser?.email || 'user').split('@')[0]}`}) or Email...`}
+                placeholder={`Search by Unique Tag (e.g. ${myTag}) or Email...`}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 style={{
@@ -532,101 +488,6 @@ export function SocialLeaderboardModal({
                 ))
               )}
             </div>
-          </div>
-        )}
-
-        {/* Tab 3: Instagram Handle Sync & Unlink */}
-        {activeTab === 'instagram' && (
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            <div style={{
-              background: 'rgba(225, 48, 108, 0.1)',
-              border: '1px solid rgba(225, 48, 108, 0.3)',
-              borderRadius: '16px',
-              padding: '16px',
-              color: '#f472b6',
-              fontSize: '13px'
-            }}>
-              📷 <strong>Link & Share Instagram Handle</strong>
-              <p style={{ margin: '6px 0 0', color: 'rgba(255, 255, 255, 0.8)', fontSize: '12px' }}>
-                Linking your Instagram handle displays `@your_name` on the Leaderboard. Tap "Invite Instagram Friends" to share your invite link directly on your Instagram Story or DMs!
-              </p>
-            </div>
-
-            <form onSubmit={handleSaveInstaHandle} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              <label style={{ fontSize: '13px', color: 'var(--text-dim)' }}>
-                Your Instagram Handle:
-              </label>
-              <input
-                type="text"
-                placeholder="e.g. @your_instagram_name"
-                value={instaHandle}
-                onChange={(e) => setInstaHandle(e.target.value)}
-                style={{
-                  padding: '12px 14px',
-                  borderRadius: '10px',
-                  background: 'rgba(255, 255, 255, 0.06)',
-                  border: '1px solid rgba(255, 255, 255, 0.15)',
-                  color: 'white',
-                  fontSize: '14px',
-                  outline: 'none'
-                }}
-              />
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <button
-                  type="submit"
-                  style={{
-                    flex: 1,
-                    padding: '12px',
-                    borderRadius: '10px',
-                    background: 'linear-gradient(135deg, #e1306c 0%, #c13584 100%)',
-                    border: 'none',
-                    color: 'white',
-                    fontWeight: 700,
-                    cursor: 'pointer'
-                  }}
-                >
-                  Save Instagram Handle
-                </button>
-                {instaHandle && (
-                  <button
-                    type="button"
-                    onClick={handleUnlinkInstaHandle}
-                    style={{
-                      padding: '12px 16px',
-                      borderRadius: '10px',
-                      background: 'rgba(239, 68, 68, 0.2)',
-                      border: '1px solid rgba(239, 68, 68, 0.4)',
-                      color: '#f87171',
-                      fontWeight: 700,
-                      cursor: 'pointer'
-                    }}
-                  >
-                    Unlink
-                  </button>
-                )}
-              </div>
-            </form>
-
-            <button
-              onClick={handleShareInstaInvite}
-              style={{
-                padding: '14px',
-                borderRadius: '12px',
-                background: 'rgba(59, 130, 246, 0.15)',
-                border: '1px solid rgba(59, 130, 246, 0.4)',
-                color: '#60a5fa',
-                fontWeight: 800,
-                fontSize: '13px',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '8px',
-                marginTop: '10px'
-              }}
-            >
-              <span>✨</span> Invite Instagram Friends to Leaderboard
-            </button>
           </div>
         )}
       </div>

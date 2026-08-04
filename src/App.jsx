@@ -556,6 +556,7 @@ export default function App() {
           goal={profile.dailyGoal}
           caloriesData={caloriesData}
           streakDays={streakDays}
+          profile={profile}
           onClose={() => setShowShareModal(false)}
         />
       )}
@@ -569,9 +570,8 @@ export default function App() {
 
       {showHistoryModal && (
         <HistoryModal 
-          userId={user ? user.uid : 'guest'}
-          localHistory={weeklyHistory}
-          dailyGoal={profile.dailyGoal}
+          user={user}
+          profile={profile}
           onClose={() => setShowHistoryModal(false)}
         />
       )}
