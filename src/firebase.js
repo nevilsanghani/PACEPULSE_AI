@@ -319,10 +319,14 @@ export async function updateUserPasswordInDb(email, newPassword) {
  */
 export async function validateUserExistsInDb(searchQuery) {
   const rawInput = searchQuery.trim();
-  const clean = rawInput.toLowerCase().replace('@', '');
-  if (!clean) return { exists: false, error: 'Please enter a valid User ID / Tag (e.g. @Nevil3), email, or name.' };
+  if (!rawInput) return { exists: false, error: 'Please enter a valid User ID / Tag (e.g. @Nevil3), email, or name.' };
 
-  const docUid = `usr_${clean.replace(/[^a-z0-9]/g, '_')}`;
+  // For direct document lookup, use the raw email (with @) to match registration format
+  const cleanForDoc = rawInput.toLowerCase().replace(/[^a-z0-9]/g, '_');
+  const docUid = `usr_${cleanForDoc}`;
+
+  // For collection scan matching, strip @ prefix for username comparisons
+  const clean = rawInput.toLowerCase().replace(/^@/, '');
 
   try {
     const controller = new AbortController();

@@ -122,7 +122,7 @@ export function AuthModal({ onSuccess, onAuthSuccess, onGuestLogin, onClose }) {
   };
 
   // Step 1: Initiate Sign-Up (Generate & Send 4-digit Email Verification PIN)
-  const handleStartSignUp = (e) => {
+  const handleStartSignUp = async (e) => {
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
@@ -175,14 +175,18 @@ export function AuthModal({ onSuccess, onAuthSuccess, onGuestLogin, onClose }) {
     setEnteredPin(['', '', '', '']);
 
     // Send Real Email OTP to user's inbox
-    sendRealEmailOtp({
+    const emailResult = await sendRealEmailOtp({
       toEmail: cleanEmail,
       toName: name.trim(),
       otpCode: newPin,
       purpose: 'signup'
     });
 
-    setSuccessMsg(`📧 4-Digit Security OTP dispatched to ${cleanEmail}! (Check your inbox & spam folder) [ Backup Code: ${newPin} ]`);
+    if (emailResult.sent) {
+      setSuccessMsg(`📧 4-Digit Verification Code sent to ${cleanEmail}! Check your inbox & spam folder.`);
+    } else {
+      setSuccessMsg(`🔐 Your Verification Code: ${newPin}`);
+    }
     setAuthStep('verify_signup_pin');
   };
 
@@ -275,14 +279,18 @@ export function AuthModal({ onSuccess, onAuthSuccess, onGuestLogin, onClose }) {
     setEnteredPin(['', '', '', '']);
 
     // Send Real Email OTP to user's inbox
-    sendRealEmailOtp({
+    const emailResult = await sendRealEmailOtp({
       toEmail: cleanEmail,
       toName: validation.targetUser?.displayName || 'User',
       otpCode: newPin,
       purpose: 'password_reset'
     });
 
-    setSuccessMsg(`📧 Password Reset OTP dispatched to ${cleanEmail}! (Check your inbox & spam folder) [ Backup Code: ${newPin} ]`);
+    if (emailResult.sent) {
+      setSuccessMsg(`📧 Password Reset Code sent to ${cleanEmail}! Check your inbox & spam folder.`);
+    } else {
+      setSuccessMsg(`🔐 Your Reset Code: ${newPin}`);
+    }
     setAuthStep('verify_reset_pin');
   };
 
