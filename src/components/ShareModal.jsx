@@ -384,7 +384,7 @@ export function ShareModal({ steps = 0, goal = 10000, streakDays = 1, caloriesDa
       if (!blob) return;
       const file = new File([blob], `PacePulse_${steps}_Steps.png`, { type: 'image/png' });
 
-      // Try Native Android Web Share API (Opens native share sheet directly to WhatsApp or Instagram)
+      // Try Native Mobile Web Share API (Opens native share sheet directly)
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         try {
           await navigator.share({
@@ -394,20 +394,38 @@ export function ShareModal({ steps = 0, goal = 10000, streakDays = 1, caloriesDa
           });
           return;
         } catch (e) {
-          console.log("Web Share cancelled/failed, falling back...", e);
+          console.log("Web Share cancelled or unsupported file sharing, falling back to direct app deep-linking...", e);
         }
       }
 
-      // Fallback if Native Web Share is unsupported on desktop browser:
+      // Fallback: Download Card & Open App Direct Deep Link
       handleDownloadCard();
-      navigator.clipboard.writeText(caption);
+      try {
+        await navigator.clipboard.writeText(caption);
+      } catch (err) {}
+
+      const encodedText = encodeURIComponent(caption);
 
       if (platform === 'whatsapp') {
-        const encodedText = encodeURIComponent(caption);
-        window.open(`https://api.whatsapp.com/send?text=${encodedText}`, '_blank');
-      } else {
-        alert("Story Image Card saved & caption copied! Select image in Instagram Stories.");
-        window.open('https://www.instagram.com/', '_blank');
+        // Direct WhatsApp App Deep Link (opens Status / Chat selector without 404 error)
+        const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+        if (isMobile) {
+          window.location.href = `whatsapp://send?text=${encodedText}`;
+        } else {
+          window.open(`https://wa.me/?text=${encodedText}`, '_blank');
+        }
+      } else if (platform === 'instagram') {
+        // Direct Instagram Camera/Story App Deep Link
+        alert("✨ Story Card saved to your device & caption copied! Opening Instagram app...");
+        const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+        if (isMobile) {
+          window.location.href = `instagram://story-camera`;
+          setTimeout(() => {
+            window.location.href = `instagram://camera`;
+          }, 1000);
+        } else {
+          window.open('https://www.instagram.com/', '_blank');
+        }
       }
     }, 'image/png');
   };
