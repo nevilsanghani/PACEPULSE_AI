@@ -368,7 +368,7 @@ export function ShareModal({ steps = 0, goal = 10000, streakDays = 1, caloriesDa
     }
   }, [steps, goal, streakDays, caloriesData, quote, cardMode, customPhotoDataUrl, overlayPosition]);
 
-  // Universal Native Mobile App Sharing (Android WhatsApp / Instagram Direct Share)
+  // Universal Native Mobile App Sharing (Android WhatsApp Status / Instagram Story)
   const handleUniversalNativeShare = async (platform) => {
     const canvas = canvasRef.current;
     if (!canvas) {
@@ -383,22 +383,37 @@ export function ShareModal({ steps = 0, goal = 10000, streakDays = 1, caloriesDa
 
     const caption = `🏃 *PacePulse AI Fitness Update* 🏃\n\n"${quote}"\n\n📊 *Daily Stats (${statusStr}):*\n• Steps: ${steps.toLocaleString()}\n• Active Calories: ${activeKcal} kcal\n• Distance: ${distKm} km\n• Active Streak: ${streakDays} days 🔥\n\nTracked with PacePulse AI! ⚡`;
 
-    // Convert canvas to blob
-    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+    // 1. Convert Canvas to JPEG format for universal mobile photo gallery compatibility
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.95));
     if (!blob) {
       alert('Could not generate story card image. Please try again.');
       return;
     }
 
-    const file = new File([blob], `PacePulse_${steps}_Steps.png`, { type: 'image/png' });
+    const file = new File([blob], `PacePulse_Progress_${steps}_Steps.jpg`, { type: 'image/jpeg' });
     const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    const encodedText = encodeURIComponent(caption);
 
-    // On Mobile (Android/iOS): Use Web Share API — this is the ONLY way to share
-    // images directly to WhatsApp Status / Instagram Story from a web app.
-    // The native share sheet lets users pick "WhatsApp > My Status" or "Instagram > Story"
+    // 2. Programmatically Download JPEG Card to device gallery
+    try {
+      const link = document.createElement('a');
+      link.download = `PacePulse_Progress_${steps}_Steps.jpg`;
+      link.href = URL.createObjectURL(blob);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (err) {
+      console.log("Card download fallback:", err);
+    }
+
+    // 3. Copy formatted caption to Android Clipboard
+    try {
+      await navigator.clipboard.writeText(caption);
+    } catch (err) {}
+
+    // 4. On Mobile (Android/iOS): Try Native Web Share API first (Opens Android Share Sheet with image + text)
     if (isMobile && navigator.share) {
       try {
-        // Try sharing with image file + text
         if (navigator.canShare && navigator.canShare({ files: [file] })) {
           await navigator.share({
             title: 'PacePulse AI Progress',
@@ -407,31 +422,25 @@ export function ShareModal({ steps = 0, goal = 10000, streakDays = 1, caloriesDa
           });
           return;
         }
-
-        // Fallback: share text only (no file support on some older browsers)
-        await navigator.share({
-          title: 'PacePulse AI Progress',
-          text: caption
-        });
-        return;
       } catch (e) {
-        // User cancelled the share sheet — this is normal, not an error
-        if (e.name === 'AbortError') return;
-        console.log("Share API error, falling back:", e);
+        if (e.name === 'AbortError') return; // User closed share sheet intentionally
       }
     }
 
-    // Desktop fallback: Download image + open web version
-    handleDownloadCard();
-    try { await navigator.clipboard.writeText(caption); } catch (err) {}
-
-    const encodedText = encodeURIComponent(caption);
-
+    // 5. Direct App Intent Launch for WhatsApp Status & Instagram Story
     if (platform === 'whatsapp') {
-      window.open(`https://web.whatsapp.com/send?text=${encodedText}`, '_blank');
+      alert("📲 Card Image downloaded to Gallery & Caption copied!\n\nOpening WhatsApp... Tap 'My Status' -> Pick top downloaded PacePulse card -> Paste caption!");
+      // Open WhatsApp native protocol on Android
+      window.location.href = `whatsapp://send?text=${encodedText}`;
+      setTimeout(() => {
+        window.open(`https://api.whatsapp.com/send?text=${encodedText}`, '_blank');
+      }, 1000);
     } else if (platform === 'instagram') {
-      alert("✨ Story Card image downloaded & caption copied!\n\nOpen Instagram → Tap '+' → Story → Select the downloaded PacePulse card from your gallery.");
-      window.open('https://www.instagram.com/', '_blank');
+      alert("📸 Card Image downloaded to Gallery & Caption copied!\n\nOpening Instagram... Tap '+' -> Story -> Pick top downloaded PacePulse card!");
+      window.location.href = 'instagram://app';
+      setTimeout(() => {
+        window.open('https://www.instagram.com/', '_blank');
+      }, 1000);
     }
   };
 

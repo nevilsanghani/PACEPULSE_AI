@@ -174,19 +174,14 @@ export function AuthModal({ onSuccess, onAuthSuccess, onGuestLogin, onClose }) {
     setDraftSignupData({ cleanEmail, cleanPassword, name: name.trim(), profileObj });
     setEnteredPin(['', '', '', '']);
 
-    // Send Real Email OTP to user's inbox
-    const emailResult = await sendRealEmailOtp({
+    await sendRealEmailOtp({
       toEmail: cleanEmail,
       toName: name.trim(),
       otpCode: newPin,
       purpose: 'signup'
     });
 
-    if (emailResult.sent) {
-      setSuccessMsg(`📧 4-Digit Verification Code sent to ${cleanEmail}! Check your inbox & spam folder.`);
-    } else {
-      setSuccessMsg(`🔐 Your Verification Code: ${newPin}`);
-    }
+    setSuccessMsg(`📧 4-Digit Verification Code sent to ${cleanEmail}! Please check your email inbox and spam folder.`);
     setAuthStep('verify_signup_pin');
   };
 
@@ -278,19 +273,14 @@ export function AuthModal({ onSuccess, onAuthSuccess, onGuestLogin, onClose }) {
     setGeneratedPin(newPin);
     setEnteredPin(['', '', '', '']);
 
-    // Send Real Email OTP to user's inbox
-    const emailResult = await sendRealEmailOtp({
+    await sendRealEmailOtp({
       toEmail: cleanEmail,
       toName: validation.targetUser?.displayName || 'User',
       otpCode: newPin,
       purpose: 'password_reset'
     });
 
-    if (emailResult.sent) {
-      setSuccessMsg(`📧 Password Reset Code sent to ${cleanEmail}! Check your inbox & spam folder.`);
-    } else {
-      setSuccessMsg(`🔐 Your Reset Code: ${newPin}`);
-    }
+    setSuccessMsg(`📧 Password Reset 4-Digit Code sent to ${cleanEmail}! Please check your email inbox and spam folder.`);
     setAuthStep('verify_reset_pin');
   };
 
