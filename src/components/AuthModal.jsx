@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { X, Lock, Mail, User, ArrowRight, AlertCircle, Database, KeyRound, CheckCircle2, RefreshCw } from 'lucide-react';
 import { calculateAgeFromBirthDate, calculateStrideCm } from '../utils/fitnessEngine';
 import { registerUserInDb, loginUserInDb, validateUserExistsInDb, updateUserPasswordInDb } from '../firebase';
+import { sendRealEmailOtp } from '../utils/emailService';
 
 export function AuthModal({ onSuccess, onAuthSuccess, onGuestLogin, onClose }) {
   const handleSuccess = onSuccess || onAuthSuccess || (() => {});
@@ -173,7 +174,15 @@ export function AuthModal({ onSuccess, onAuthSuccess, onGuestLogin, onClose }) {
     setDraftSignupData({ cleanEmail, cleanPassword, name: name.trim(), profileObj });
     setEnteredPin(['', '', '', '']);
 
-    setSuccessMsg(`📧 Email Verification Code sent to ${cleanEmail}: [ ${newPin} ]`);
+    // Send Real Email OTP to user's inbox
+    sendRealEmailOtp({
+      toEmail: cleanEmail,
+      toName: name.trim(),
+      otpCode: newPin,
+      purpose: 'signup'
+    });
+
+    setSuccessMsg(`📧 4-Digit Security OTP dispatched to ${cleanEmail}! (Check your inbox & spam folder) [ Backup Code: ${newPin} ]`);
     setAuthStep('verify_signup_pin');
   };
 
@@ -265,7 +274,15 @@ export function AuthModal({ onSuccess, onAuthSuccess, onGuestLogin, onClose }) {
     setGeneratedPin(newPin);
     setEnteredPin(['', '', '', '']);
 
-    setSuccessMsg(`📧 Password Reset PIN sent to ${cleanEmail}: [ ${newPin} ]`);
+    // Send Real Email OTP to user's inbox
+    sendRealEmailOtp({
+      toEmail: cleanEmail,
+      toName: validation.targetUser?.displayName || 'User',
+      otpCode: newPin,
+      purpose: 'password_reset'
+    });
+
+    setSuccessMsg(`📧 Password Reset OTP dispatched to ${cleanEmail}! (Check your inbox & spam folder) [ Backup Code: ${newPin} ]`);
     setAuthStep('verify_reset_pin');
   };
 

@@ -407,25 +407,25 @@ export function ShareModal({ steps = 0, goal = 10000, streakDays = 1, caloriesDa
       const encodedText = encodeURIComponent(caption);
 
       if (platform === 'whatsapp') {
-        // Direct WhatsApp App Deep Link (opens Status / Chat selector without 404 error)
+        // Universal WhatsApp Share URL (Works on Mobile App & Desktop Web without 404 errors!)
+        const waUrl = `https://api.whatsapp.com/send?text=${encodedText}`;
         const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+        
         if (isMobile) {
-          window.location.href = `whatsapp://send?text=${encodedText}`;
+          // On mobile, try opening WhatsApp native app protocol first, fallback to wa.me with api
+          const link = document.createElement('a');
+          link.href = `whatsapp://send?text=${encodedText}`;
+          link.click();
+          setTimeout(() => {
+            window.open(waUrl, '_blank');
+          }, 600);
         } else {
-          window.open(`https://wa.me/?text=${encodedText}`, '_blank');
+          window.open(`https://web.whatsapp.com/send?text=${encodedText}`, '_blank');
         }
       } else if (platform === 'instagram') {
-        // Direct Instagram Camera/Story App Deep Link
-        alert("✨ Story Card saved to your device & caption copied! Opening Instagram app...");
-        const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-        if (isMobile) {
-          window.location.href = `instagram://story-camera`;
-          setTimeout(() => {
-            window.location.href = `instagram://camera`;
-          }, 1000);
-        } else {
-          window.open('https://www.instagram.com/', '_blank');
-        }
+        // Instagram Story Share Workflow
+        alert("✨ Story Image Card downloaded to your device & caption text copied!\n\nOpen Instagram -> Tap '+' -> Choose 'Story' -> Select downloaded PacePulse card.");
+        window.open('https://www.instagram.com/', '_blank');
       }
     }, 'image/png');
   };
