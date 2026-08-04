@@ -18,10 +18,33 @@ export function AuthModal({ onSuccess, onAuthSuccess, onGuestLogin, onClose }) {
   const [successMsg, setSuccessMsg] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // 4-Digit PIN States
+  // 4-Digit PIN States & 10-Minute Expiry Timer
   const [generatedPin, setGeneratedPin] = useState('');
   const [enteredPin, setEnteredPin] = useState(['', '', '', '']);
+  const [pinExpiresAt, setPinExpiresAt] = useState(null);
+  const [secondsRemaining, setSecondsRemaining] = useState(600); // 10 minutes = 600s
   const pinInputRefs = [useRef(null), useRef(null), useRef(null), useRef(null)];
+
+  // Live countdown timer effect for PIN validity
+  React.useEffect(() => {
+    if (!pinExpiresAt || (authStep !== 'verify_signup_pin' && authStep !== 'verify_reset_pin')) return;
+
+    const timer = setInterval(() => {
+      const remaining = Math.max(0, Math.floor((pinExpiresAt - Date.now()) / 1000));
+      setSecondsRemaining(remaining);
+      if (remaining === 0) {
+        clearInterval(timer);
+      }
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [pinExpiresAt, authStep]);
+
+  const formatTimer = (totalSeconds) => {
+    const mins = Math.floor(totalSeconds / 60);
+    const secs = totalSeconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
 
   // Password Reset Inputs
   const [newPassword, setNewPassword] = useState('');
@@ -43,9 +66,13 @@ export function AuthModal({ onSuccess, onAuthSuccess, onGuestLogin, onClose }) {
   // Computed Age
   const computedAge = calculateAgeFromBirthDate(birthDate);
 
-  // Generate a random 4-digit PIN
+  // Generate a random 4-digit PIN and set 10-minute expiry
   const createRandomPin = () => {
-    return Math.floor(1000 + Math.random() * 9000).toString();
+    const pin = Math.floor(1000 + Math.random() * 9000).toString();
+    const expiry = Date.now() + 10 * 60 * 1000; // 10 minutes from now
+    setPinExpiresAt(expiry);
+    setSecondsRemaining(600);
+    return pin;
   };
 
   // Height Unit Toggle Helper
@@ -161,6 +188,12 @@ export function AuthModal({ onSuccess, onAuthSuccess, onGuestLogin, onClose }) {
       return;
     }
 
+    // Enforce 10-Minute Expiry
+    if (pinExpiresAt && Date.now() > pinExpiresAt) {
+      setErrorMsg('⏰ 4-Digit PIN has expired (10-minute limit). Please tap "Resend PIN" to get a fresh code.');
+      return;
+    }
+
     if (code !== generatedPin) {
       setErrorMsg('❌ Invalid 4-Digit Verification PIN. Please check your email code and try again.');
       return;
@@ -244,6 +277,12 @@ export function AuthModal({ onSuccess, onAuthSuccess, onGuestLogin, onClose }) {
 
     if (code.length !== 4) {
       setErrorMsg('Please enter the 4-digit reset PIN.');
+      return;
+    }
+
+    // Enforce 10-Minute Expiry
+    if (pinExpiresAt && Date.now() > pinExpiresAt) {
+      setErrorMsg('⏰ Password Reset PIN has expired (10-minute limit). Please tap "Resend PIN" to get a fresh code.');
       return;
     }
 
@@ -642,7 +681,23 @@ export function AuthModal({ onSuccess, onAuthSuccess, onGuestLogin, onClose }) {
         {/* ================= VIEW 2: 4-DIGIT PIN VERIFICATION FOR SIGNUP ================= */}
         {authStep === 'verify_signup_pin' && (
           <form onSubmit={handleVerifySignupPin} style={{ textAlign: 'center' }}>
-            <div style={{ display: 'flex', justifyContent: 'center', gap: '12px', margin: '20px 0' }}>
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: secondsRemaining > 60 ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+              border: `1px solid ${secondsRemaining > 60 ? 'rgba(16, 185, 129, 0.4)' : 'rgba(239, 68, 68, 0.4)'}`,
+              padding: '6px 14px',
+              borderRadius: '20px',
+              color: secondsRemaining > 60 ? '#34D399' : '#F87171',
+              fontSize: '12px',
+              fontWeight: 800,
+              marginBottom: '10px'
+            }}>
+              ⏱️ OTP Valid for: {formatTimer(secondsRemaining)}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'center', gap: '12px', margin: '14px 0 20px' }}>
               {enteredPin.map((digit, idx) => (
                 <input
                   key={idx}
@@ -672,7 +727,7 @@ export function AuthModal({ onSuccess, onAuthSuccess, onGuestLogin, onClose }) {
             </div>
 
             <button type="submit" className="btn-primary" style={{ width: '100%', background: 'linear-gradient(135deg, #10B981 0%, #059669 100%)', marginBottom: '14px' }} disabled={loading}>
-              {loading ? 'Registering...' : 'Verify PIN & Create Account'}
+              {loading ? 'Registering...' : 'Verify OTP & Create Account'}
               <CheckCircle2 size={18} />
             </button>
 
@@ -682,11 +737,11 @@ export function AuthModal({ onSuccess, onAuthSuccess, onGuestLogin, onClose }) {
                 const newPin = createRandomPin();
                 setGeneratedPin(newPin);
                 setEnteredPin(['', '', '', '']);
-                setSuccessMsg(`📧 New Verification Code sent to ${email}: [ ${newPin} ]`);
+                setSuccessMsg(`📧 New Verification OTP sent to ${email}: [ ${newPin} ] (Valid 10 mins)`);
               }}
               style={{ background: 'none', border: 'none', color: '#60A5FA', fontSize: '12px', fontWeight: '600', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
             >
-              <RefreshCw size={14} /> Resend 4-Digit PIN
+              <RefreshCw size={14} /> Resend OTP Code
             </button>
           </form>
         )}
@@ -713,7 +768,7 @@ export function AuthModal({ onSuccess, onAuthSuccess, onGuestLogin, onClose }) {
             </div>
 
             <button type="submit" className="btn-primary" style={{ width: '100%', marginBottom: '14px' }} disabled={loading}>
-              {loading ? 'Searching Account...' : 'Send 4-Digit Reset PIN 📩'}
+              {loading ? 'Searching Account...' : 'Send 4-Digit Reset OTP 📩'}
               <ArrowRight size={18} />
             </button>
           </form>
@@ -722,7 +777,23 @@ export function AuthModal({ onSuccess, onAuthSuccess, onGuestLogin, onClose }) {
         {/* ================= VIEW 4: FORGOT PASSWORD - PIN VERIFICATION ================= */}
         {authStep === 'verify_reset_pin' && (
           <form onSubmit={handleVerifyResetPin} style={{ textAlign: 'center' }}>
-            <div style={{ display: 'flex', justifyContent: 'center', gap: '12px', margin: '20px 0' }}>
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: secondsRemaining > 60 ? 'rgba(245, 158, 11, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+              border: `1px solid ${secondsRemaining > 60 ? 'rgba(245, 158, 11, 0.4)' : 'rgba(239, 68, 68, 0.4)'}`,
+              padding: '6px 14px',
+              borderRadius: '20px',
+              color: secondsRemaining > 60 ? '#FBBF24' : '#F87171',
+              fontSize: '12px',
+              fontWeight: 800,
+              marginBottom: '10px'
+            }}>
+              ⏱️ Reset OTP Valid for: {formatTimer(secondsRemaining)}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'center', gap: '12px', margin: '14px 0 20px' }}>
               {enteredPin.map((digit, idx) => (
                 <input
                   key={idx}
@@ -752,7 +823,7 @@ export function AuthModal({ onSuccess, onAuthSuccess, onGuestLogin, onClose }) {
             </div>
 
             <button type="submit" className="btn-primary" style={{ width: '100%', background: 'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)', marginBottom: '14px' }}>
-              Verify Reset PIN
+              Verify Reset OTP
               <CheckCircle2 size={18} />
             </button>
           </form>
