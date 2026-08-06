@@ -40,7 +40,7 @@ export const handler = async (event) => {
       purpose: 'signup'
     });
 
-    if (!emailResult.sent) return jsonResponse(502, { error: 'Could not send the verification email right now. Please try again.' });
+    if (!emailResult.sent) return jsonResponse(502, { error: 'Could not send the verification email right now. Please try again.', debugStatus: emailResult.debugStatus, debugBody: emailResult.debugBody, debugFetchErr: emailResult.debugFetchErr });
 
     return jsonResponse(200, { sent: true });
   } catch (err) {
