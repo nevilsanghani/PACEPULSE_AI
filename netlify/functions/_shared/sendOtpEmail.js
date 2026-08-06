@@ -1,7 +1,10 @@
 /**
  * PacePulse AI - Server-side OTP Email Dispatcher (EmailJS REST API)
- * Same EmailJS service/template/public key as the (removed) client-side
- * emailService.js - the EmailJS public key is safe to use server-side too.
+ * Authenticates as a trusted server via EMAILJS_PRIVATE_KEY (the "accessToken" field
+ * EmailJS documents for non-browser/server callers) instead of relying on the public
+ * key's domain whitelist - keeps the account-wide "allow non-browser API access"
+ * toggle off, since that would let anyone who reads the public repo's source (which
+ * contains the public key) send email through this account directly.
  */
 const EMAILJS_SERVICE_ID = 'service_sez5spj';
 const EMAILJS_TEMPLATE_ID = 'template_r1xq7vi';
@@ -24,6 +27,7 @@ export async function sendOtpEmail({ toEmail, toName = 'PacePulse User', otpCode
         service_id: EMAILJS_SERVICE_ID,
         template_id: EMAILJS_TEMPLATE_ID,
         user_id: EMAILJS_PUBLIC_KEY,
+        accessToken: process.env.EMAILJS_PRIVATE_KEY,
         template_params: {
           to_email: toEmail,
           to_name: toName,
