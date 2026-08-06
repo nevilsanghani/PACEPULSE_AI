@@ -403,8 +403,11 @@ export function ShareModal({ steps = 0, goal = 10000, streakDays = 1, caloriesDa
 
     const caption = `🏃 *PacePulse AI Fitness Update* 🏃\n\n"${quote}"\n\n📊 *Daily Stats (${statusStr}):*\n• Steps: ${steps.toLocaleString()}\n• Active Calories: ${activeKcal} kcal\n• Distance: ${distKm} km${elevationLine}\n• Active Streak: ${streakDays} days 🔥\n\nTracked with PacePulse AI! ⚡`;
 
-    // 1. Convert Canvas to JPEG format for universal mobile photo gallery compatibility
-    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.95));
+    // 1. Convert Canvas to JPEG format for universal mobile photo gallery compatibility.
+    // Quality 0.85 (not 0.95) keeps the share card visually sharp while roughly halving
+    // the base64 payload handed across the JS<->native bridge, which is what was making
+    // WhatsApp/Instagram feel slow to open (the intent can't fire until that transfer finishes).
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.85));
     if (!blob) {
       alert('Could not generate story card image. Please try again.');
       return;
