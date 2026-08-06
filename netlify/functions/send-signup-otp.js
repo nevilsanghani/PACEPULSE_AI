@@ -45,6 +45,6 @@ export const handler = async (event) => {
     return jsonResponse(200, { sent: true });
   } catch (err) {
     console.error('send-signup-otp error:', err);
-    return jsonResponse(500, { error: 'Something went wrong. Please try again.' });
+    return jsonResponse(500, { error: 'Something went wrong. Please try again.', debug: String(err && err.message || err) });
   }
 };
