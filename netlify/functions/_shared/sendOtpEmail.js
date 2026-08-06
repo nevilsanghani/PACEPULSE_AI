@@ -17,32 +17,25 @@ export async function sendOtpEmail({ toEmail, toName = 'PacePulse User', otpCode
 
   const messageBody = `Hello ${toName},\n\nYour 4-digit PacePulse AI verification code for ${purposeTitle} is:\n\n🔐 ${otpCode}\n\nThis code is valid for 10 minutes. Please enter this code in your PacePulse AI app to proceed.\n\nIf you did not request this code, please ignore this email.\n\nBest regards,\nPacePulse AI Fitness Team`;
 
-  let res;
-  let fetchErr = null;
-  try {
-    res = await fetch('https://api.emailjs.com/api/v1.0/email/send', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        service_id: EMAILJS_SERVICE_ID,
-        template_id: EMAILJS_TEMPLATE_ID,
-        user_id: EMAILJS_PUBLIC_KEY,
-        accessToken: process.env.EMAILJS_PRIVATE_KEY,
-        template_params: {
-          to_email: toEmail,
-          to_name: toName,
-          otp_code: otpCode,
-          purpose_title: purposeTitle,
-          message: messageBody
-        }
-      })
-    });
-  } catch (e) {
-    fetchErr = e;
-  }
+  const res = await fetch('https://api.emailjs.com/api/v1.0/email/send', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      service_id: EMAILJS_SERVICE_ID,
+      template_id: EMAILJS_TEMPLATE_ID,
+      user_id: EMAILJS_PUBLIC_KEY,
+      accessToken: process.env.EMAILJS_PRIVATE_KEY,
+      template_params: {
+        to_email: toEmail,
+        to_name: toName,
+        otp_code: otpCode,
+        purpose_title: purposeTitle,
+        message: messageBody
+      }
+    })
+  }).catch(() => null);
 
-  const bodyText = res ? await res.text().catch(() => '') : '';
-  return { sent: !!(res && res.ok), debugStatus: res ? res.status : 'NO_RESPONSE', debugBody: bodyText, debugFetchErr: fetchErr ? String(fetchErr.message || fetchErr) : null };
+  return { sent: !!(res && res.ok) };
 }
 
 export function generateOtpCode() {
