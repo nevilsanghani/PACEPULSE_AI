@@ -1,7 +1,0 @@
-[build]
-  command = "echo 'Backend-only deploy - no public site build needed'"
-  publish = "netlify/public"
-
-[functions]
-  directory = "netlify/functions"
-  node_bundler = "esbuild"

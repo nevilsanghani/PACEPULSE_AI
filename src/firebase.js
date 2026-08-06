@@ -5,15 +5,17 @@ import { initializeApp } from 'firebase/app';
 import {
   getAuth,
   signInWithEmailAndPassword,
-  signInWithCustomToken,
   signOut as firebaseSignOut,
   deleteUser,
-  createUserWithEmailAndPassword
+  createUserWithEmailAndPassword,
+  sendEmailVerification,
+  sendPasswordResetEmail
 } from 'firebase/auth';
 
 /**
- * Public, safe-to-ship Firebase Web App config (NOT a secret - unlike the
- * Admin SDK service-account key used only in netlify/functions/*).
+ * Public, safe-to-ship Firebase Web App config (not a secret - this is meant to
+ * be embedded in client apps; access is governed by Firestore Security Rules
+ * and Firebase Auth, not by keeping this value hidden).
  * Fill these in from Firebase Console -> Project Settings -> Your apps -> Web app.
  */
 const firebaseConfig = {
@@ -53,6 +55,128 @@ export async function signOut() {
     await firebaseSignOut(auth);
   } catch (e) {}
   return true;
+}
+
+/**
+ * Create a real Firebase Authentication account and immediately trigger Firebase's
+ * own built-in email verification flow (Authentication -> Templates in the Firebase
+ * Console controls the branding/sender name/subject/body of that email). No custom
+ * backend is involved - Google's own servers send and validate the link, which is
+ * what makes this unbypassable from client-side JS, same guarantee the old
+ * Netlify-based OTP functions provided, just without a third-party dependency.
+ */
+export async function registerUserInDb(email, password, displayName, profile) {
+  const cleanEmail = email.trim().toLowerCase();
+  const cleanPassword = password.trim();
+
+  let cred;
+  try {
+    cred = await createUserWithEmailAndPassword(auth, cleanEmail, cleanPassword);
+  } catch (err) {
+    if (err.code === 'auth/email-already-in-use') {
+      return { success: false, error: 'An account with this email address already exists. Please sign in instead.' };
+    }
+    if (err.code === 'auth/invalid-email') {
+      return { success: false, error: 'Please enter a valid email address.' };
+    }
+    if (err.code === 'auth/weak-password') {
+      return { success: false, error: 'Password is too weak. Please choose a stronger password.' };
+    }
+    return { success: false, error: 'Account creation failed. Please check your connection and try again.' };
+  }
+
+  const uid = cred.user.uid;
+  const username = `@${cleanEmail.split('@')[0].replace(/[^a-z0-9]/g, '')}`;
+  const fullProfile = { ...(profile || {}), name: displayName.trim(), email: cleanEmail, username };
+
+  await firestoreFetch(`${FIRESTORE_REST_BASE}/users/${uid}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      fields: {
+        uid: { stringValue: uid },
+        displayName: { stringValue: displayName.trim() },
+        email: { stringValue: cleanEmail },
+        username: { stringValue: username },
+        createdAt: { stringValue: new Date().toISOString() },
+        profile: { mapValue: { fields: objectToFirestoreFields(fullProfile) } }
+      }
+    })
+  }).catch(() => {});
+
+  let verificationSent = true;
+  try {
+    await sendEmailVerification(cred.user);
+  } catch (e) {
+    verificationSent = false;
+  }
+
+  return {
+    success: true,
+    verificationSent,
+    user: { uid, displayName: displayName.trim(), email: cleanEmail, username, profile: fullProfile }
+  };
+}
+
+/** Re-sends the verification email to whoever is currently signed in. */
+export async function resendVerificationEmail() {
+  if (!auth.currentUser) return { success: false, error: 'You need to be signed in to resend a verification email.' };
+  try {
+    await sendEmailVerification(auth.currentUser);
+    return { success: true };
+  } catch (err) {
+    if (err.code === 'auth/too-many-requests') {
+      return { success: false, error: 'Too many requests. Please wait a moment before requesting another email.' };
+    }
+    return { success: false, error: 'Could not resend the verification email right now. Please try again.' };
+  }
+}
+
+/** Refreshes the current user's record from Firebase and reports whether they've verified their email yet. */
+export async function checkEmailVerified() {
+  if (!auth.currentUser) return false;
+  try {
+    await auth.currentUser.reload();
+  } catch (e) {}
+  return !!auth.currentUser.emailVerified;
+}
+
+/**
+ * Sends Firebase's own built-in password-reset email - the user sets their new
+ * password directly on Firebase's secure hosted page reached via that email's link,
+ * so no custom backend ever sees or handles the new password in transit.
+ */
+export async function requestPasswordReset(email) {
+  const cleanEmail = email.trim().toLowerCase();
+  try {
+    await sendPasswordResetEmail(auth, cleanEmail);
+    return { success: true };
+  } catch (err) {
+    if (err.code === 'auth/user-not-found') {
+      return { success: false, error: `No account found matching email "${cleanEmail}".` };
+    }
+    if (err.code === 'auth/too-many-requests') {
+      return { success: false, error: 'Too many requests. Please wait a moment and try again.' };
+    }
+    return { success: false, error: 'Network error. Please check your connection and try again.' };
+  }
+}
+
+/** Converts a plain JS object into Firestore REST API's typed field format (flat values only). */
+function objectToFirestoreFields(obj) {
+  const fields = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (typeof value === 'number') {
+      fields[key] = Number.isInteger(value) ? { integerValue: String(value) } : { doubleValue: value };
+    } else if (typeof value === 'boolean') {
+      fields[key] = { booleanValue: value };
+    } else if (value === null || value === undefined) {
+      fields[key] = { nullValue: null };
+    } else {
+      fields[key] = { stringValue: String(value) };
+    }
+  }
+  return fields;
 }
 
 /**

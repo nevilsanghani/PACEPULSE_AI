@@ -1,60 +1,23 @@
-import React, { useState, useRef } from 'react';
-import { signInWithCustomToken } from 'firebase/auth';
-import { X, Lock, Mail, User, ArrowRight, AlertCircle, Database, KeyRound, CheckCircle2, RefreshCw } from 'lucide-react';
+import React, { useState } from 'react';
+import { X, Lock, Mail, User, ArrowRight, AlertCircle, Database, CheckCircle2, RefreshCw, MailCheck } from 'lucide-react';
 import { calculateAgeFromBirthDate, calculateStrideCm } from '../utils/fitnessEngine';
 import { isStrongPassword, PASSWORD_POLICY_MESSAGE } from '../utils/passwordPolicy';
-import { auth, loginUserInDb } from '../firebase';
+import { auth, loginUserInDb, registerUserInDb, resendVerificationEmail, checkEmailVerified, requestPasswordReset, fetchUserProfileDoc } from '../firebase';
 
-// PacePulse AI has no public web frontend - this backend is called directly by
-// the Android (and future Mac) app's WebView, which is always a different origin,
-// so relative fetch URLs like '/.netlify/functions/...' would not resolve correctly.
-const BACKEND_BASE = 'https://endearing-horse-9fc93a.netlify.app';
-
-export function AuthModal({ onSuccess, onAuthSuccess, onGuestLogin, onClose }) {
+export function AuthModal({ onSuccess, onAuthSuccess, onGuestLogin, onClose, initialUnverifiedEmail }) {
   const handleSuccess = onSuccess || onAuthSuccess || (() => {});
 
-  // View States: 'auth' | 'verify_signup_pin' | 'forgot_email' | 'verify_reset_pin' | 'new_password'
-  const [authStep, setAuthStep] = useState('auth');
+  // View States: 'auth' | 'awaiting_verification' | 'forgot_email' | 'reset_email_sent'
+  const [authStep, setAuthStep] = useState(initialUnverifiedEmail ? 'awaiting_verification' : 'auth');
   const [isSignUp, setIsSignUp] = useState(false);
 
   // Core Auth Inputs
   const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(initialUnverifiedEmail || '');
   const [password, setPassword] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [loading, setLoading] = useState(false);
-
-  // 4-Digit PIN States & 10-Minute Expiry Timer (the code itself is verified server-side only)
-  const [enteredPin, setEnteredPin] = useState(['', '', '', '']);
-  const [pinExpiresAt, setPinExpiresAt] = useState(null);
-  const [secondsRemaining, setSecondsRemaining] = useState(600); // 10 minutes = 600s
-  const pinInputRefs = [useRef(null), useRef(null), useRef(null), useRef(null)];
-
-  // Live countdown timer effect for PIN validity
-  React.useEffect(() => {
-    if (!pinExpiresAt || (authStep !== 'verify_signup_pin' && authStep !== 'verify_reset_pin')) return;
-
-    const timer = setInterval(() => {
-      const remaining = Math.max(0, Math.floor((pinExpiresAt - Date.now()) / 1000));
-      setSecondsRemaining(remaining);
-      if (remaining === 0) {
-        clearInterval(timer);
-      }
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [pinExpiresAt, authStep]);
-
-  const formatTimer = (totalSeconds) => {
-    const mins = Math.floor(totalSeconds / 60);
-    const secs = totalSeconds % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  // Password Reset Inputs
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
 
   // Sign-Up Specific Profile Fields
   const [gender, setGender] = useState('male');
@@ -67,7 +30,6 @@ export function AuthModal({ onSuccess, onAuthSuccess, onGuestLogin, onClose }) {
   const [weightKgInput, setWeightKgInput] = useState('70');
   const [weightLbsInput, setWeightLbsInput] = useState('154');
   const [dailyGoalInput, setDailyGoalInput] = useState('10000');
-  const [draftSignupData, setDraftSignupData] = useState(null);
 
   // Computed Age
   const computedAge = calculateAgeFromBirthDate(birthDate);
@@ -98,26 +60,8 @@ export function AuthModal({ onSuccess, onAuthSuccess, onGuestLogin, onClose }) {
     }
   };
 
-  // Single Digit PIN Input Handler
-  const handlePinDigitChange = (index, value) => {
-    if (!/^\d*$/.test(value)) return;
-    const newPin = [...enteredPin];
-    newPin[index] = value.slice(-1);
-    setEnteredPin(newPin);
-
-    // Auto-advance focus to next digit box
-    if (value && index < 3) {
-      pinInputRefs[index + 1].current?.focus();
-    }
-  };
-
-  const handlePinKeyDown = (index, e) => {
-    if (e.key === 'Backspace' && !enteredPin[index] && index > 0) {
-      pinInputRefs[index - 1].current?.focus();
-    }
-  };
-
-  // Step 1: Initiate Sign-Up (Generate & Send 4-digit Email Verification PIN)
+  // Sign-Up: create the real Firebase Auth account immediately, then trigger
+  // Firebase's own built-in email verification (no custom backend involved).
   const handleStartSignUp = async (e) => {
     e.preventDefault();
     setErrorMsg('');
@@ -165,68 +109,46 @@ export function AuthModal({ onSuccess, onAuthSuccess, onGuestLogin, onClose }) {
       useAutoStride: true
     };
 
-    setDraftSignupData({ cleanEmail, cleanPassword, name: name.trim(), profileObj });
-    setEnteredPin(['', '', '', '']);
-    setPinExpiresAt(Date.now() + 10 * 60 * 1000); // Cosmetic client countdown only - the server is authoritative
-    setSecondsRemaining(600);
     setLoading(true);
+    const res = await registerUserInDb(cleanEmail, cleanPassword, name.trim(), profileObj);
+    setLoading(false);
 
-    try {
-      const res = await fetch(`${BACKEND_BASE}/.netlify/functions/send-signup-otp`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: cleanEmail, displayName: name.trim() })
-      });
-      const data = await res.json().catch(() => ({}));
-      setLoading(false);
-
-      if (!res.ok) {
-        setErrorMsg(data.error || 'Could not send the verification email right now. Please try again.');
-        return;
-      }
-
-      setSuccessMsg(`📧 4-Digit Verification Code sent to ${cleanEmail}! Please check your email inbox and spam folder.`);
-      setAuthStep('verify_signup_pin');
-    } catch (err) {
-      setLoading(false);
-      setErrorMsg('Network error. Please check your connection and try again.');
-    }
-  };
-
-  // Step 2: Submit the PIN to the server, which verifies it and only then creates the account
-  const handleVerifySignupPin = async (e) => {
-    e.preventDefault();
-    setErrorMsg('');
-    const code = enteredPin.join('');
-
-    if (code.length !== 4) {
-      setErrorMsg('Please enter all 4 digits of the verification PIN.');
+    if (!res.success) {
+      setErrorMsg(res.error || 'Account registration failed.');
       return;
     }
 
+    setSuccessMsg(res.verificationSent
+      ? `📧 Verification email sent to ${cleanEmail}! Open it and tap the link, then come back here and tap "I've Verified."`
+      : `Account created, but the verification email couldn't be sent just now. Tap "Resend Email" below to try again.`);
+    setAuthStep('awaiting_verification');
+  };
+
+  // Re-checks whether the signed-in user has clicked the verification link yet
+  const handleCheckVerified = async () => {
+    setErrorMsg('');
     setLoading(true);
-    try {
-      const { cleanEmail, cleanPassword, name, profileObj } = draftSignupData;
-      const res = await fetch(`${BACKEND_BASE}/.netlify/functions/verify-signup-and-create-account`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: cleanEmail, code, password: cleanPassword, displayName: name, profile: profileObj })
-      });
-      const data = await res.json().catch(() => ({}));
+    const verified = await checkEmailVerified();
+    setLoading(false);
 
-      if (!res.ok || !data.success) {
-        setLoading(false);
-        setErrorMsg(data.error || 'Account registration failed.');
-        return;
-      }
+    if (!verified) {
+      setErrorMsg('Still not verified yet. Open the email and tap the link, then try again.');
+      return;
+    }
 
-      await signInWithCustomToken(auth, data.customToken);
-      setLoading(false);
-      handleSuccess(data.user);
-      onClose();
-    } catch (err) {
-      setLoading(false);
-      setErrorMsg('Account registration failed. Please try again.');
+    const user = await fetchUserProfileDoc(auth.currentUser.uid, auth.currentUser.email);
+    handleSuccess(user);
+    onClose();
+  };
+
+  const handleResendVerification = async () => {
+    setErrorMsg('');
+    setSuccessMsg('');
+    const res = await resendVerificationEmail();
+    if (res.success) {
+      setSuccessMsg('📧 Verification email resent! Please check your inbox and spam folder.');
+    } else {
+      setErrorMsg(res.error || 'Could not resend the verification email right now.');
     }
   };
 
@@ -248,15 +170,23 @@ export function AuthModal({ onSuccess, onAuthSuccess, onGuestLogin, onClose }) {
     const res = await loginUserInDb(cleanEmail, cleanPassword);
     setLoading(false);
 
-    if (res.success) {
-      handleSuccess(res.user);
-      onClose();
-    } else {
+    if (!res.success) {
       setErrorMsg(res.error || 'Login failed. Please check your credentials.');
+      return;
     }
+
+    if (auth.currentUser && !auth.currentUser.emailVerified) {
+      setSuccessMsg(`Please verify your email (${cleanEmail}) before continuing. Check your inbox for the link.`);
+      setAuthStep('awaiting_verification');
+      return;
+    }
+
+    handleSuccess(res.user);
+    onClose();
   };
 
-  // Forgot Password Step 1: Ask the server to send a reset code (it also confirms the account exists)
+  // Forgot Password: Firebase sends its own reset email - the user sets the new
+  // password directly on Firebase's secure hosted page, no custom backend involved.
   const handleStartForgotPassword = async (e) => {
     e.preventDefault();
     setErrorMsg('');
@@ -269,85 +199,15 @@ export function AuthModal({ onSuccess, onAuthSuccess, onGuestLogin, onClose }) {
     }
 
     setLoading(true);
-    try {
-      const res = await fetch(`${BACKEND_BASE}/.netlify/functions/send-reset-otp`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: cleanEmail })
-      });
-      const data = await res.json().catch(() => ({}));
-      setLoading(false);
+    const res = await requestPasswordReset(cleanEmail);
+    setLoading(false);
 
-      if (!res.ok) {
-        setErrorMsg(data.error || `No account found matching email "${cleanEmail}".`);
-        return;
-      }
-
-      setEnteredPin(['', '', '', '']);
-      setPinExpiresAt(Date.now() + 10 * 60 * 1000); // Cosmetic client countdown only - the server is authoritative
-      setSecondsRemaining(600);
-      setSuccessMsg(`📧 Password Reset 4-Digit Code sent to ${cleanEmail}! Please check your email inbox and spam folder.`);
-      setAuthStep('verify_reset_pin');
-    } catch (err) {
-      setLoading(false);
-      setErrorMsg('Network error. Please check your connection and try again.');
-    }
-  };
-
-  // Forgot Password Step 2: Just a UI transition - the code itself is verified server-side
-  // together with the new password in handleSaveNewPassword, never trusted client-side alone.
-  const handleVerifyResetPin = (e) => {
-    e.preventDefault();
-    setErrorMsg('');
-    const code = enteredPin.join('');
-
-    if (code.length !== 4) {
-      setErrorMsg('Please enter the 4-digit reset PIN.');
+    if (!res.success) {
+      setErrorMsg(res.error || `No account found matching email "${cleanEmail}".`);
       return;
     }
 
-    setAuthStep('new_password');
-  };
-
-  // Forgot Password Step 3: Send the code + new password together - the server verifies
-  // the code and only then changes the password
-  const handleSaveNewPassword = async (e) => {
-    e.preventDefault();
-    setErrorMsg('');
-
-    if (!isStrongPassword(newPassword)) {
-      setErrorMsg(PASSWORD_POLICY_MESSAGE);
-      return;
-    }
-
-    if (newPassword !== confirmPassword) {
-      setErrorMsg('New Password and Confirm Password do not match.');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const res = await fetch(`${BACKEND_BASE}/.netlify/functions/confirm-password-reset`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim().toLowerCase(), code: enteredPin.join(''), newPassword })
-      });
-      const data = await res.json().catch(() => ({}));
-      setLoading(false);
-
-      if (!res.ok || !data.success) {
-        setErrorMsg(data.error || 'Password reset failed. Please try again.');
-        return;
-      }
-
-      setPassword(newPassword);
-      setSuccessMsg('✨ Password updated successfully! Please sign in with your new password.');
-      setAuthStep('auth');
-      setIsSignUp(false);
-    } catch (err) {
-      setLoading(false);
-      setErrorMsg('Network error. Please check your connection and try again.');
-    }
+    setAuthStep('reset_email_sent');
   };
 
   // Continue as Guest Handler
@@ -412,9 +272,9 @@ export function AuthModal({ onSuccess, onAuthSuccess, onGuestLogin, onClose }) {
             width: '48px',
             height: '48px',
             borderRadius: '16px',
-            background: authStep.includes('pin') 
+            background: authStep === 'awaiting_verification'
               ? 'linear-gradient(135deg, #10B981 0%, #059669 100%)'
-              : authStep === 'new_password' || authStep === 'forgot_email'
+              : authStep === 'forgot_email' || authStep === 'reset_email_sent'
               ? 'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)'
               : 'linear-gradient(135deg, #00F2FE 0%, #8B5CF6 100%)',
             display: 'inline-flex',
@@ -423,21 +283,19 @@ export function AuthModal({ onSuccess, onAuthSuccess, onGuestLogin, onClose }) {
             marginBottom: '10px',
             boxShadow: '0 0 20px rgba(0, 242, 254, 0.4)'
           }}>
-            {authStep.includes('pin') ? <KeyRound size={24} color="#FFFFFF" /> : <Database size={24} color="#040914" />}
+            {authStep === 'awaiting_verification' ? <MailCheck size={24} color="#FFFFFF" /> : <Database size={24} color="#040914" />}
           </div>
 
           <h2 style={{ fontSize: '20px', fontWeight: '800' }}>
-            {authStep === 'verify_signup_pin' ? 'Verify Email (4-Digit PIN)' :
+            {authStep === 'awaiting_verification' ? 'Verify Your Email' :
              authStep === 'forgot_email' ? 'Reset Account Password' :
-             authStep === 'verify_reset_pin' ? 'Verify Password Reset PIN' :
-             authStep === 'new_password' ? 'Set New Account Password' :
+             authStep === 'reset_email_sent' ? 'Check Your Email' :
              isSignUp ? 'Create Production Account' : 'Welcome to PacePulse AI'}
           </h2>
           <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-            {authStep === 'verify_signup_pin' ? `Enter the 4-digit verification PIN sent to ${email}` :
-             authStep === 'forgot_email' ? 'Enter your registered email to receive a password reset code' :
-             authStep === 'verify_reset_pin' ? `Enter the 4-digit PIN sent to ${email}` :
-             authStep === 'new_password' ? 'Enter your new secure password' :
+            {authStep === 'awaiting_verification' ? `We sent a verification link to ${email}` :
+             authStep === 'forgot_email' ? 'Enter your registered email to receive a password reset link' :
+             authStep === 'reset_email_sent' ? `A password reset link was sent to ${email}` :
              isSignUp ? 'Free Cloud Database Account Registration' : 'Sign in to access your profile & goals on any mobile or desktop device'}
           </p>
         </div>
@@ -705,90 +563,39 @@ export function AuthModal({ onSuccess, onAuthSuccess, onGuestLogin, onClose }) {
             )}
 
             <button type="submit" className="btn-primary" style={{ width: '100%', marginBottom: '16px', marginTop: '14px' }} disabled={loading}>
-              {loading ? 'Authenticating...' : isSignUp ? 'Send 4-Digit Verification PIN 📩' : 'Sign In'}
+              {loading ? 'Authenticating...' : isSignUp ? 'Create Account & Send Verification Email 📩' : 'Sign In'}
               <ArrowRight size={18} />
             </button>
           </form>
         )}
 
-        {/* ================= VIEW 2: 4-DIGIT PIN VERIFICATION FOR SIGNUP ================= */}
-        {authStep === 'verify_signup_pin' && (
-          <form onSubmit={handleVerifySignupPin} style={{ textAlign: 'center' }}>
-            <div style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              background: secondsRemaining > 60 ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
-              border: `1px solid ${secondsRemaining > 60 ? 'rgba(16, 185, 129, 0.4)' : 'rgba(239, 68, 68, 0.4)'}`,
-              padding: '6px 14px',
-              borderRadius: '20px',
-              color: secondsRemaining > 60 ? '#34D399' : '#F87171',
-              fontSize: '12px',
-              fontWeight: 800,
-              marginBottom: '10px'
-            }}>
-              ⏱️ OTP Valid for: {formatTimer(secondsRemaining)}
-            </div>
+        {/* ================= VIEW 2: AWAITING EMAIL VERIFICATION (SIGNUP OR GATED LOGIN) ================= */}
+        {authStep === 'awaiting_verification' && (
+          <div style={{ textAlign: 'center' }}>
+            <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '20px', lineHeight: '1.5' }}>
+              Open the email we sent and tap the verification link. Once you've done that, tap
+              "I've Verified" below to continue.
+            </p>
 
-            <div style={{ display: 'flex', justifyContent: 'center', gap: '12px', margin: '14px 0 20px' }}>
-              {enteredPin.map((digit, idx) => (
-                <input
-                  key={idx}
-                  ref={pinInputRefs[idx]}
-                  type="text"
-                  inputMode="numeric"
-                  maxLength={1}
-                  value={digit}
-                  onChange={(e) => handlePinDigitChange(idx, e.target.value)}
-                  onKeyDown={(e) => handlePinKeyDown(idx, e)}
-                  style={{
-                    width: '56px',
-                    height: '60px',
-                    borderRadius: '16px',
-                    background: 'rgba(255, 255, 255, 0.08)',
-                    border: digit ? '2px solid #10B981' : '1px solid rgba(255, 255, 255, 0.2)',
-                    color: '#FFFFFF',
-                    fontSize: '24px',
-                    fontWeight: '800',
-                    textAlign: 'center',
-                    outline: 'none',
-                    boxShadow: digit ? '0 0 12px rgba(16, 185, 129, 0.3)' : 'none'
-                  }}
-                  autoFocus={idx === 0}
-                />
-              ))}
-            </div>
-
-            <button type="submit" className="btn-primary" style={{ width: '100%', background: 'linear-gradient(135deg, #10B981 0%, #059669 100%)', marginBottom: '14px' }} disabled={loading}>
-              {loading ? 'Registering...' : 'Verify OTP & Create Account'}
+            <button
+              type="button"
+              onClick={handleCheckVerified}
+              className="btn-primary"
+              style={{ width: '100%', background: 'linear-gradient(135deg, #10B981 0%, #059669 100%)', marginBottom: '14px' }}
+              disabled={loading}
+            >
+              {loading ? 'Checking...' : "I've Verified - Continue"}
               <CheckCircle2 size={18} />
             </button>
 
             <button
               type="button"
-              onClick={async () => {
-                if (!draftSignupData) return;
-                setErrorMsg('');
-                const res = await fetch(`${BACKEND_BASE}/.netlify/functions/send-signup-otp`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ email: draftSignupData.cleanEmail, displayName: draftSignupData.name })
-                });
-                const data = await res.json().catch(() => ({}));
-                if (!res.ok) {
-                  setErrorMsg(data.error || 'Could not resend the code right now. Please try again.');
-                  return;
-                }
-                setEnteredPin(['', '', '', '']);
-                setPinExpiresAt(Date.now() + 10 * 60 * 1000);
-                setSecondsRemaining(600);
-                setSuccessMsg(`📧 New Verification Code sent to ${draftSignupData.cleanEmail}! Please check your inbox.`);
-              }}
+              onClick={handleResendVerification}
               style={{ background: 'none', border: 'none', color: '#60A5FA', fontSize: '12px', fontWeight: '600', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
             >
-              <RefreshCw size={14} /> Resend OTP Code
+              <RefreshCw size={14} /> Resend Verification Email
             </button>
-          </form>
+          </div>
         )}
 
         {/* ================= VIEW 3: FORGOT PASSWORD - EMAIL ENTRY ================= */}
@@ -813,106 +620,20 @@ export function AuthModal({ onSuccess, onAuthSuccess, onGuestLogin, onClose }) {
             </div>
 
             <button type="submit" className="btn-primary" style={{ width: '100%', marginBottom: '14px' }} disabled={loading}>
-              {loading ? 'Searching Account...' : 'Send 4-Digit Reset OTP 📩'}
+              {loading ? 'Searching Account...' : 'Send Password Reset Link 📩'}
               <ArrowRight size={18} />
             </button>
           </form>
         )}
 
-        {/* ================= VIEW 4: FORGOT PASSWORD - PIN VERIFICATION ================= */}
-        {authStep === 'verify_reset_pin' && (
-          <form onSubmit={handleVerifyResetPin} style={{ textAlign: 'center' }}>
-            <div style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              background: secondsRemaining > 60 ? 'rgba(245, 158, 11, 0.15)' : 'rgba(239, 68, 68, 0.15)',
-              border: `1px solid ${secondsRemaining > 60 ? 'rgba(245, 158, 11, 0.4)' : 'rgba(239, 68, 68, 0.4)'}`,
-              padding: '6px 14px',
-              borderRadius: '20px',
-              color: secondsRemaining > 60 ? '#FBBF24' : '#F87171',
-              fontSize: '12px',
-              fontWeight: 800,
-              marginBottom: '10px'
-            }}>
-              ⏱️ Reset OTP Valid for: {formatTimer(secondsRemaining)}
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'center', gap: '12px', margin: '14px 0 20px' }}>
-              {enteredPin.map((digit, idx) => (
-                <input
-                  key={idx}
-                  ref={pinInputRefs[idx]}
-                  type="text"
-                  inputMode="numeric"
-                  maxLength={1}
-                  value={digit}
-                  onChange={(e) => handlePinDigitChange(idx, e.target.value)}
-                  onKeyDown={(e) => handlePinKeyDown(idx, e)}
-                  style={{
-                    width: '56px',
-                    height: '60px',
-                    borderRadius: '16px',
-                    background: 'rgba(255, 255, 255, 0.08)',
-                    border: digit ? '2px solid #F59E0B' : '1px solid rgba(255, 255, 255, 0.2)',
-                    color: '#FFFFFF',
-                    fontSize: '24px',
-                    fontWeight: '800',
-                    textAlign: 'center',
-                    outline: 'none',
-                    boxShadow: digit ? '0 0 12px rgba(245, 158, 11, 0.3)' : 'none'
-                  }}
-                  autoFocus={idx === 0}
-                />
-              ))}
-            </div>
-
-            <button type="submit" className="btn-primary" style={{ width: '100%', background: 'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)', marginBottom: '14px' }}>
-              Verify Reset OTP
-              <CheckCircle2 size={18} />
-            </button>
-          </form>
-        )}
-
-        {/* ================= VIEW 5: FORGOT PASSWORD - SET NEW PASSWORD ================= */}
-        {authStep === 'new_password' && (
-          <form onSubmit={handleSaveNewPassword}>
-            <div style={{ marginBottom: '14px' }}>
-              <label style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-muted)', display: 'block', marginBottom: '6px' }}>
-                New Password
-              </label>
-              <input
-                type="password"
-                placeholder="••••••••"
-                className="glass-input"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                required
-              />
-              <p style={{ fontSize: '10px', color: 'var(--text-dim)', marginTop: '4px' }}>
-                At least 8 characters, with an uppercase letter, lowercase letter, and a number.
-              </p>
-            </div>
-
-            <div style={{ marginBottom: '18px' }}>
-              <label style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-muted)', display: 'block', marginBottom: '6px' }}>
-                Confirm New Password
-              </label>
-              <input
-                type="password"
-                placeholder="••••••••"
-                className="glass-input"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                required
-              />
-            </div>
-
-            <button type="submit" className="btn-primary" style={{ width: '100%', marginBottom: '14px' }} disabled={loading}>
-              {loading ? 'Saving...' : 'Save New Password & Sign In'}
-              <CheckCircle2 size={18} />
-            </button>
-          </form>
+        {/* ================= VIEW 4: FORGOT PASSWORD - RESET EMAIL SENT ================= */}
+        {authStep === 'reset_email_sent' && (
+          <div style={{ textAlign: 'center' }}>
+            <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '20px', lineHeight: '1.5' }}>
+              Open the email and tap the link to set a new password on Firebase's secure page.
+              Once that's done, come back here and sign in with your new password.
+            </p>
+          </div>
         )}
 
         {/* Toggle Login vs Sign Up / Back to Sign In */}

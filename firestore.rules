@@ -17,14 +17,5 @@ service cloud.firestore {
         allow read, write: if request.auth != null;
       }
     }
-
-    // OTP records are never touched by any client - only the Admin-SDK-backed
-    // serverless functions (which bypass rules entirely) may read/write these.
-    match /signup_otps/{email} {
-      allow read, write: if false;
-    }
-    match /reset_otps/{email} {
-      allow read, write: if false;
-    }
   }
 }
