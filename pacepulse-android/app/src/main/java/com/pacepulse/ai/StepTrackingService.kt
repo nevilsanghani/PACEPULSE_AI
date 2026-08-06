@@ -25,6 +25,7 @@ class StepTrackingService : Service(), SensorEventListener {
     private lateinit var sensorManager: SensorManager
     private var stepCounterSensor: Sensor? = null
     private var stepDetectorSensor: Sensor? = null
+    private var pressureSensor: Sensor? = null
     private lateinit var notificationManager: NotificationManager
 
     companion object {
@@ -42,9 +43,14 @@ class StepTrackingService : Service(), SensorEventListener {
         val initialSteps = NativeStepManager.getSavedTodaySteps(this)
         startForeground(NOTIFICATION_ID, buildNotification(initialSteps))
 
+        // Ensure motion classification (walking vs in-vehicle) is active even when this
+        // service starts on its own (e.g. after boot), independent of MainActivity.
+        NativeStepManager.registerMotionTransitionUpdates(this)
+
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         stepCounterSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
         stepDetectorSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR)
+        pressureSensor = sensorManager.getDefaultSensor(Sensor.TYPE_PRESSURE)
         val accelSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
 
         stepCounterSensor?.let {
@@ -55,6 +61,9 @@ class StepTrackingService : Service(), SensorEventListener {
         }
         accelSensor?.let {
             sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME)
+        }
+        pressureSensor?.let {
+            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL)
         }
 
         Log.d("PacePulseService", "24/7 Background Step Tracking Service Active.")
@@ -90,6 +99,8 @@ class StepTrackingService : Service(), SensorEventListener {
         } else if (event.sensor.type == Sensor.TYPE_STEP_COUNTER) {
             val todaySteps = NativeStepManager.processCumulativeStep(this, event.values[0], null)
             notificationManager.notify(NOTIFICATION_ID, buildNotification(todaySteps))
+        } else if (event.sensor.type == Sensor.TYPE_PRESSURE) {
+            ElevationManager.processPressureSample(this, event.values[0], null)
         }
     }
 

@@ -1,8 +1,14 @@
 import React, { useState, useRef } from 'react';
+import { signInWithCustomToken } from 'firebase/auth';
 import { X, Lock, Mail, User, ArrowRight, AlertCircle, Database, KeyRound, CheckCircle2, RefreshCw } from 'lucide-react';
 import { calculateAgeFromBirthDate, calculateStrideCm } from '../utils/fitnessEngine';
-import { registerUserInDb, loginUserInDb, validateUserExistsInDb, updateUserPasswordInDb } from '../firebase';
-import { sendRealEmailOtp } from '../utils/emailService';
+import { isStrongPassword, PASSWORD_POLICY_MESSAGE } from '../utils/passwordPolicy';
+import { auth, loginUserInDb } from '../firebase';
+
+// PacePulse AI has no public web frontend - this backend is called directly by
+// the Android (and future Mac) app's WebView, which is always a different origin,
+// so relative fetch URLs like '/.netlify/functions/...' would not resolve correctly.
+const BACKEND_BASE = 'https://endearing-horse-9fc93a.netlify.app';
 
 export function AuthModal({ onSuccess, onAuthSuccess, onGuestLogin, onClose }) {
   const handleSuccess = onSuccess || onAuthSuccess || (() => {});
@@ -19,8 +25,7 @@ export function AuthModal({ onSuccess, onAuthSuccess, onGuestLogin, onClose }) {
   const [successMsg, setSuccessMsg] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // 4-Digit PIN States & 10-Minute Expiry Timer
-  const [generatedPin, setGeneratedPin] = useState('');
+  // 4-Digit PIN States & 10-Minute Expiry Timer (the code itself is verified server-side only)
   const [enteredPin, setEnteredPin] = useState(['', '', '', '']);
   const [pinExpiresAt, setPinExpiresAt] = useState(null);
   const [secondsRemaining, setSecondsRemaining] = useState(600); // 10 minutes = 600s
@@ -66,15 +71,6 @@ export function AuthModal({ onSuccess, onAuthSuccess, onGuestLogin, onClose }) {
 
   // Computed Age
   const computedAge = calculateAgeFromBirthDate(birthDate);
-
-  // Generate a random 4-digit PIN and set 10-minute expiry
-  const createRandomPin = () => {
-    const pin = Math.floor(1000 + Math.random() * 9000).toString();
-    const expiry = Date.now() + 10 * 60 * 1000; // 10 minutes from now
-    setPinExpiresAt(expiry);
-    setSecondsRemaining(600);
-    return pin;
-  };
 
   // Height Unit Toggle Helper
   const handleHeightUnitToggle = (unit) => {
@@ -138,8 +134,8 @@ export function AuthModal({ onSuccess, onAuthSuccess, onGuestLogin, onClose }) {
       setErrorMsg('Please enter both Email Address and Password.');
       return;
     }
-    if (cleanPassword.length < 4) {
-      setErrorMsg('Password must be at least 4 characters long.');
+    if (!isStrongPassword(cleanPassword)) {
+      setErrorMsg(PASSWORD_POLICY_MESSAGE);
       return;
     }
 
@@ -169,23 +165,35 @@ export function AuthModal({ onSuccess, onAuthSuccess, onGuestLogin, onClose }) {
       useAutoStride: true
     };
 
-    const newPin = createRandomPin();
-    setGeneratedPin(newPin);
     setDraftSignupData({ cleanEmail, cleanPassword, name: name.trim(), profileObj });
     setEnteredPin(['', '', '', '']);
+    setPinExpiresAt(Date.now() + 10 * 60 * 1000); // Cosmetic client countdown only - the server is authoritative
+    setSecondsRemaining(600);
+    setLoading(true);
 
-    await sendRealEmailOtp({
-      toEmail: cleanEmail,
-      toName: name.trim(),
-      otpCode: newPin,
-      purpose: 'signup'
-    });
+    try {
+      const res = await fetch(`${BACKEND_BASE}/.netlify/functions/send-signup-otp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: cleanEmail, displayName: name.trim() })
+      });
+      const data = await res.json().catch(() => ({}));
+      setLoading(false);
 
-    setSuccessMsg(`📧 4-Digit Verification Code sent to ${cleanEmail}! Please check your email inbox and spam folder.`);
-    setAuthStep('verify_signup_pin');
+      if (!res.ok) {
+        setErrorMsg(data.error || 'Could not send the verification email right now. Please try again.');
+        return;
+      }
+
+      setSuccessMsg(`📧 4-Digit Verification Code sent to ${cleanEmail}! Please check your email inbox and spam folder.`);
+      setAuthStep('verify_signup_pin');
+    } catch (err) {
+      setLoading(false);
+      setErrorMsg('Network error. Please check your connection and try again.');
+    }
   };
 
-  // Step 2: Verify Signup PIN & Create Account in Cloud Firestore
+  // Step 2: Submit the PIN to the server, which verifies it and only then creates the account
   const handleVerifySignupPin = async (e) => {
     e.preventDefault();
     setErrorMsg('');
@@ -196,28 +204,29 @@ export function AuthModal({ onSuccess, onAuthSuccess, onGuestLogin, onClose }) {
       return;
     }
 
-    // Enforce 10-Minute Expiry
-    if (pinExpiresAt && Date.now() > pinExpiresAt) {
-      setErrorMsg('⏰ 4-Digit PIN has expired (10-minute limit). Please tap "Resend PIN" to get a fresh code.');
-      return;
-    }
-
-    if (code !== generatedPin) {
-      setErrorMsg('❌ Invalid 4-Digit Verification PIN. Please check your email code and try again.');
-      return;
-    }
-
-    // PIN Verified! Register in Cloud Firestore DB
     setLoading(true);
     try {
       const { cleanEmail, cleanPassword, name, profileObj } = draftSignupData;
-      const newUser = await registerUserInDb(cleanEmail, cleanPassword, name, profileObj);
+      const res = await fetch(`${BACKEND_BASE}/.netlify/functions/verify-signup-and-create-account`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: cleanEmail, code, password: cleanPassword, displayName: name, profile: profileObj })
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        setLoading(false);
+        setErrorMsg(data.error || 'Account registration failed.');
+        return;
+      }
+
+      await signInWithCustomToken(auth, data.customToken);
       setLoading(false);
-      handleSuccess(newUser);
+      handleSuccess(data.user);
       onClose();
     } catch (err) {
       setLoading(false);
-      setErrorMsg(err.message || 'Account registration failed.');
+      setErrorMsg('Account registration failed. Please try again.');
     }
   };
 
@@ -247,44 +256,46 @@ export function AuthModal({ onSuccess, onAuthSuccess, onGuestLogin, onClose }) {
     }
   };
 
-  // Forgot Password Step 1: Check Email & Send PIN
+  // Forgot Password Step 1: Ask the server to send a reset code (it also confirms the account exists)
   const handleStartForgotPassword = async (e) => {
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
-    setLoading(true);
 
     const cleanEmail = email.trim().toLowerCase();
     if (!cleanEmail) {
       setErrorMsg('Please enter your registered email address.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await fetch(`${BACKEND_BASE}/.netlify/functions/send-reset-otp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: cleanEmail })
+      });
+      const data = await res.json().catch(() => ({}));
       setLoading(false);
-      return;
+
+      if (!res.ok) {
+        setErrorMsg(data.error || `No account found matching email "${cleanEmail}".`);
+        return;
+      }
+
+      setEnteredPin(['', '', '', '']);
+      setPinExpiresAt(Date.now() + 10 * 60 * 1000); // Cosmetic client countdown only - the server is authoritative
+      setSecondsRemaining(600);
+      setSuccessMsg(`📧 Password Reset 4-Digit Code sent to ${cleanEmail}! Please check your email inbox and spam folder.`);
+      setAuthStep('verify_reset_pin');
+    } catch (err) {
+      setLoading(false);
+      setErrorMsg('Network error. Please check your connection and try again.');
     }
-
-    const validation = await validateUserExistsInDb(cleanEmail);
-    setLoading(false);
-
-    if (!validation.exists) {
-      setErrorMsg(`No account found matching email "${cleanEmail}" in Cloud Database.`);
-      return;
-    }
-
-    const newPin = createRandomPin();
-    setGeneratedPin(newPin);
-    setEnteredPin(['', '', '', '']);
-
-    await sendRealEmailOtp({
-      toEmail: cleanEmail,
-      toName: validation.targetUser?.displayName || 'User',
-      otpCode: newPin,
-      purpose: 'password_reset'
-    });
-
-    setSuccessMsg(`📧 Password Reset 4-Digit Code sent to ${cleanEmail}! Please check your email inbox and spam folder.`);
-    setAuthStep('verify_reset_pin');
   };
 
-  // Forgot Password Step 2: Verify Reset PIN
+  // Forgot Password Step 2: Just a UI transition - the code itself is verified server-side
+  // together with the new password in handleSaveNewPassword, never trusted client-side alone.
   const handleVerifyResetPin = (e) => {
     e.preventDefault();
     setErrorMsg('');
@@ -295,28 +306,17 @@ export function AuthModal({ onSuccess, onAuthSuccess, onGuestLogin, onClose }) {
       return;
     }
 
-    // Enforce 10-Minute Expiry
-    if (pinExpiresAt && Date.now() > pinExpiresAt) {
-      setErrorMsg('⏰ Password Reset PIN has expired (10-minute limit). Please tap "Resend PIN" to get a fresh code.');
-      return;
-    }
-
-    if (code !== generatedPin) {
-      setErrorMsg('❌ Invalid Reset PIN. Please check your code and try again.');
-      return;
-    }
-
-    setSuccessMsg('✅ PIN verified! Enter your new password below.');
     setAuthStep('new_password');
   };
 
-  // Forgot Password Step 3: Save New Password
+  // Forgot Password Step 3: Send the code + new password together - the server verifies
+  // the code and only then changes the password
   const handleSaveNewPassword = async (e) => {
     e.preventDefault();
     setErrorMsg('');
 
-    if (!newPassword || newPassword.length < 4) {
-      setErrorMsg('New password must be at least 4 characters long.');
+    if (!isStrongPassword(newPassword)) {
+      setErrorMsg(PASSWORD_POLICY_MESSAGE);
       return;
     }
 
@@ -326,13 +326,28 @@ export function AuthModal({ onSuccess, onAuthSuccess, onGuestLogin, onClose }) {
     }
 
     setLoading(true);
-    await updateUserPasswordInDb(email, newPassword);
-    setLoading(false);
+    try {
+      const res = await fetch(`${BACKEND_BASE}/.netlify/functions/confirm-password-reset`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim().toLowerCase(), code: enteredPin.join(''), newPassword })
+      });
+      const data = await res.json().catch(() => ({}));
+      setLoading(false);
 
-    setPassword(newPassword);
-    setSuccessMsg('✨ Password updated successfully! Please sign in with your new password.');
-    setAuthStep('auth');
-    setIsSignUp(false);
+      if (!res.ok || !data.success) {
+        setErrorMsg(data.error || 'Password reset failed. Please try again.');
+        return;
+      }
+
+      setPassword(newPassword);
+      setSuccessMsg('✨ Password updated successfully! Please sign in with your new password.');
+      setAuthStep('auth');
+      setIsSignUp(false);
+    } catch (err) {
+      setLoading(false);
+      setErrorMsg('Network error. Please check your connection and try again.');
+    }
   };
 
   // Continue as Guest Handler
@@ -545,6 +560,9 @@ export function AuthModal({ onSuccess, onAuthSuccess, onGuestLogin, onClose }) {
                     onChange={(e) => setPassword(e.target.value)}
                     required
                   />
+                  <p style={{ fontSize: '10px', color: 'var(--text-dim)', marginTop: '4px' }}>
+                    At least 8 characters, with an uppercase letter, lowercase letter, and a number.
+                  </p>
                 </div>
 
                 <div style={{ padding: '12px', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '16px', marginBottom: '16px', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
@@ -748,11 +766,23 @@ export function AuthModal({ onSuccess, onAuthSuccess, onGuestLogin, onClose }) {
 
             <button
               type="button"
-              onClick={() => {
-                const newPin = createRandomPin();
-                setGeneratedPin(newPin);
+              onClick={async () => {
+                if (!draftSignupData) return;
+                setErrorMsg('');
+                const res = await fetch(`${BACKEND_BASE}/.netlify/functions/send-signup-otp`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ email: draftSignupData.cleanEmail, displayName: draftSignupData.name })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                  setErrorMsg(data.error || 'Could not resend the code right now. Please try again.');
+                  return;
+                }
                 setEnteredPin(['', '', '', '']);
-                setSuccessMsg(`📧 New Verification OTP sent to ${email}: [ ${newPin} ] (Valid 10 mins)`);
+                setPinExpiresAt(Date.now() + 10 * 60 * 1000);
+                setSecondsRemaining(600);
+                setSuccessMsg(`📧 New Verification Code sent to ${draftSignupData.cleanEmail}! Please check your inbox.`);
               }}
               style={{ background: 'none', border: 'none', color: '#60A5FA', fontSize: '12px', fontWeight: '600', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
             >
@@ -859,6 +889,9 @@ export function AuthModal({ onSuccess, onAuthSuccess, onGuestLogin, onClose }) {
                 onChange={(e) => setNewPassword(e.target.value)}
                 required
               />
+              <p style={{ fontSize: '10px', color: 'var(--text-dim)', marginTop: '4px' }}>
+                At least 8 characters, with an uppercase letter, lowercase letter, and a number.
+              </p>
             </div>
 
             <div style={{ marginBottom: '18px' }}>

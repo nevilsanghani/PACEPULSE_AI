@@ -1,26 +1,31 @@
 import React, { useState, useEffect } from 'react';
+import { onAuthStateChanged } from 'firebase/auth';
 import confetti from 'canvas-confetti';
 import { Navbar } from './components/Navbar';
 import { StepRing } from './components/StepRing';
 import { HourlyChart } from './components/HourlyChart';
 import { WeeklyStepChart } from './components/WeeklyStepChart';
 import { StreakTracker } from './components/StreakTracker';
+import { ElevationWidget } from './components/ElevationWidget';
 import { ProfileModal } from './components/ProfileModal';
 import { ShareModal } from './components/ShareModal';
 import { AuthModal } from './components/AuthModal';
 import { ResetConfirmationModal } from './components/ResetConfirmationModal';
+import { DeleteAccountModal } from './components/DeleteAccountModal';
 import { HistoryModal } from './components/HistoryModal';
 import { SocialLeaderboardModal } from './components/SocialLeaderboardModal';
 import { NotificationModal } from './components/NotificationModal';
 import { speakMilestoneAnnouncement, speakGoalReachedAnnouncement, setAudioCoachMuted } from './utils/audioCoach';
 import { 
-  auth, 
+  auth,
   signOut,
   saveDailyLogsToDb,
   getDailyLogsFromDb,
   getPendingRequestsFromDb,
   queueOfflineDailyLog,
-  flushOfflineSyncQueue
+  flushOfflineSyncQueue,
+  deleteUserAccountFromDb,
+  fetchUserProfileDoc
 } from './firebase';
 import { 
   DEFAULT_PROFILE, 
@@ -63,6 +68,7 @@ export default function App() {
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
   const [showResetModal, setShowResetModal] = useState(false);
+  const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [showSocialModal, setShowSocialModal] = useState(false);
   const [showNotificationModal, setShowNotificationModal] = useState(false);
@@ -85,6 +91,15 @@ export default function App() {
     }
     return generateEmptyHourlyData();
   });
+
+  // Today's Elevation Gain (meters climbed), synced from the native barometer bridge
+  const [todayElevationM, setTodayElevationM] = useState(() => {
+    const uid = user ? user.uid : 'guest';
+    const key = `pacepulse_elevation_${uid}_${todayStr}`;
+    const saved = localStorage.getItem(key);
+    return saved !== null ? parseFloat(saved) : 0;
+  });
+  const [elevationSupported, setElevationSupported] = useState(true);
 
   // Active Streak Days Counter
   const [streakDays, setStreakDays] = useState(() => {
@@ -161,6 +176,9 @@ export default function App() {
           const hourlyKey = getUserKey('pacepulse_hourly', user);
           localStorage.setItem(hourlyKey, JSON.stringify(todayLog.hourlyData));
         }
+        if (todayLog && typeof todayLog.elevationGainM === 'number') {
+          setTodayElevationM(todayLog.elevationGainM);
+        }
       }
     });
 
@@ -235,13 +253,16 @@ export default function App() {
     };
   }, [user]);
 
-  const lastSyncedRef = React.useRef({ steps: -1, date: '', uid: '', goal: -1 });
+  const lastSyncedRef = React.useRef({ steps: -1, date: '', uid: '', goal: -1, elevation: -1 });
 
   // Persist hourly data, streak & profile to user-scoped localStorage & Firestore DB
   useEffect(() => {
     const uid = user ? user.uid : 'guest';
     const key = `pacepulse_hourly_${uid}_${todayStr}`;
     localStorage.setItem(key, JSON.stringify(hourlyData));
+
+    const elevationKey = `pacepulse_elevation_${uid}_${todayStr}`;
+    localStorage.setItem(elevationKey, String(todayElevationM));
 
     // Push live UI metrics directly to Android AppWidget
     if (window.AndroidStepBridge && window.AndroidStepBridge.updateWidgetData) {
@@ -257,11 +278,11 @@ export default function App() {
 
     // Check if step count or relevant params actually changed since last sync
     const last = lastSyncedRef.current;
-    if (last.steps === totalDailySteps && last.date === todayStr && last.uid === user.uid && last.goal === profile.dailyGoal) {
-      return; // No change in steps or profile - skip network sync to avoid flickering!
+    if (last.steps === totalDailySteps && last.date === todayStr && last.uid === user.uid && last.goal === profile.dailyGoal && last.elevation === todayElevationM) {
+      return; // No change in steps, profile or elevation - skip network sync to avoid flickering!
     }
 
-    lastSyncedRef.current = { steps: totalDailySteps, date: todayStr, uid: user.uid, goal: profile.dailyGoal };
+    lastSyncedRef.current = { steps: totalDailySteps, date: todayStr, uid: user.uid, goal: profile.dailyGoal, elevation: todayElevationM };
 
     if (navigator.onLine) {
       setCloudSyncStatus('syncing');
@@ -271,7 +292,8 @@ export default function App() {
         totalDailySteps,
         profile.dailyGoal,
         caloriesData,
-        hourlyData
+        hourlyData,
+        todayElevationM
       ).then(() => setCloudSyncStatus('synced'));
     } else {
       queueOfflineDailyLog(
@@ -280,11 +302,12 @@ export default function App() {
         totalDailySteps,
         profile.dailyGoal,
         caloriesData,
-        hourlyData
+        hourlyData,
+        todayElevationM
       );
       setCloudSyncStatus('offline');
     }
-  }, [hourlyData, user, profile.dailyGoal, totalDailySteps, caloriesData, todayStr]);
+  }, [hourlyData, user, profile.dailyGoal, totalDailySteps, caloriesData, todayStr, todayElevationM]);
 
   useEffect(() => {
     const key = getUserKey('pacepulse_profile');
@@ -331,6 +354,13 @@ export default function App() {
       });
     };
 
+    window.syncNativeTodayElevation = (meters, supported = true) => {
+      if (typeof meters === 'number' && !isNaN(meters)) {
+        setTodayElevationM(meters);
+      }
+      setElevationSupported(!!supported);
+    };
+
     // Auto 1-second instant polling when app is active
     const pollInterval = setInterval(() => {
       if (window.AndroidStepBridge && window.AndroidStepBridge.requestInstantSync) {
@@ -342,6 +372,7 @@ export default function App() {
       clearInterval(pollInterval);
       delete window.syncNativeTodaySteps;
       delete window.addNativeSteps;
+      delete window.syncNativeTodayElevation;
     };
   }, [user]);
 
@@ -394,6 +425,10 @@ export default function App() {
       setHourlyData(generateEmptyHourlyData());
     }
 
+    // Load isolated elevation gain for authenticated user
+    const savedElevation = localStorage.getItem(`pacepulse_elevation_${currentUid}_${todayStr}`);
+    setTodayElevationM(savedElevation !== null ? parseFloat(savedElevation) : 0);
+
     if (authenticatedUser.uid && authenticatedUser.uid !== 'guest') {
       const remoteLogs = await getDailyLogsFromDb(authenticatedUser.uid);
       if (remoteLogs && remoteLogs.length > 0) {
@@ -406,9 +441,39 @@ export default function App() {
           setHourlyData(todayLog.hourlyData);
           localStorage.setItem(hourlyKey, JSON.stringify(todayLog.hourlyData));
         }
+        if (todayLog && typeof todayLog.elevationGainM === 'number') {
+          setTodayElevationM(todayLog.elevationGainM);
+        }
       }
     }
   };
+
+  // Keep a ref of the latest user so the long-lived onAuthStateChanged listener
+  // below never compares against a stale closure.
+  const userRef = React.useRef(user);
+  useEffect(() => { userRef.current = user; }, [user]);
+
+  // Authoritative session check: real Firebase Auth session state wins over any
+  // cached localStorage session. This is what catches a session cached under the
+  // old (pre-migration) uid scheme - since it isn't backed by a real Firebase Auth
+  // session, it gets cleared here and the user is sent back to sign in, which
+  // transparently triggers the one-time legacy-account migration in loginUserInDb.
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        if (!userRef.current || userRef.current.uid !== firebaseUser.uid) {
+          const freshUser = await fetchUserProfileDoc(firebaseUser.uid, firebaseUser.email || '');
+          await handleAuthSuccess(freshUser);
+        }
+      } else if (userRef.current && userRef.current.uid !== 'guest') {
+        // Cached session isn't guest mode and isn't backed by a real Firebase session - stale, clear it
+        localStorage.removeItem('pacepulse_user');
+        setUser(null);
+        setShowAuthModal(true);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
 
   // Sign Out Handler
   const handleSignOut = () => {
@@ -420,12 +485,37 @@ export default function App() {
     localStorage.removeItem('pacepulse_user');
     setProfile(DEFAULT_PROFILE);
     setHourlyData(generateEmptyHourlyData());
+    setTodayElevationM(0);
+    setShowAuthModal(true);
+  };
+
+  // Permanently Delete Account: wipes Cloud Firestore data + all local caches, then signs out
+  const handleDeleteAccount = async () => {
+    if (!user || !user.uid || user.uid === 'guest') return;
+
+    const result = await deleteUserAccountFromDb(user.uid, user.email);
+    if (!result.success) return result;
+
+    if (window.AndroidStepBridge && window.AndroidStepBridge.setActiveUser) {
+      window.AndroidStepBridge.setActiveUser('guest');
+    }
+
+    setShowDeleteAccountModal(false);
+    setShowProfileModal(false);
+    setUser(null);
+    localStorage.removeItem('pacepulse_user');
+    setProfile(DEFAULT_PROFILE);
+    setHourlyData(generateEmptyHourlyData());
+    setTodayElevationM(0);
+    setWeeklyHistory([]);
+    setStreakDays(0);
     setShowAuthModal(true);
   };
 
   const handleResetBaseline = () => {
     const emptyHourly = generateEmptyHourlyData();
     setHourlyData(emptyHourly);
+    setTodayElevationM(0);
     setShowResetModal(false);
 
     const uid = user ? user.uid : 'guest';
@@ -434,6 +524,9 @@ export default function App() {
 
     const todayHourlyKey = `pacepulse_hourly_${uid}_${todayStr}`;
     localStorage.setItem(todayHourlyKey, JSON.stringify(emptyHourly));
+
+    const todayElevationKey = `pacepulse_elevation_${uid}_${todayStr}`;
+    localStorage.setItem(todayElevationKey, '0');
 
     // Reset weekly step progress entry for today to 0
     setWeeklyHistory(prev => {
@@ -446,6 +539,7 @@ export default function App() {
         activeKcal: 0,
         distanceKm: 0,
         durationMins: 0,
+        elevationGainM: 0,
         completed: false,
         hourlyData: emptyHourly
       };
@@ -462,7 +556,7 @@ export default function App() {
     });
 
     if (user && user.uid !== 'guest') {
-      saveDailyLogsToDb(user.uid, todayStr, 0, profile.dailyGoal, { activeKcal: 0, distanceKm: 0 }, emptyHourly);
+      saveDailyLogsToDb(user.uid, todayStr, 0, profile.dailyGoal, { activeKcal: 0, distanceKm: 0 }, emptyHourly, 0);
     }
 
     if (window.AndroidStepBridge && window.AndroidStepBridge.resetNativeBaseline) {
@@ -529,8 +623,14 @@ export default function App() {
             currentHour={new Date().getHours()}
           />
 
+          {/* Elevation Gain (barometer-based, rejects elevators/vehicles) */}
+          <ElevationWidget
+            elevationM={todayElevationM}
+            supported={elevationSupported}
+          />
+
           {/* Streak & Consistency Badge Section with Live Steps */}
-          <StreakTracker 
+          <StreakTracker
             streakDays={computedStreakDays}
             history={weeklyHistory}
             dailyGoal={profile.dailyGoal}
@@ -543,20 +643,32 @@ export default function App() {
 
       {/* Modals */}
       {showProfileModal && (
-        <ProfileModal 
+        <ProfileModal
           profile={profile}
+          user={user}
           onSave={(updatedProfile) => setProfile(updatedProfile)}
           onClose={() => setShowProfileModal(false)}
+          onOpenDeleteAccount={() => setShowDeleteAccountModal(true)}
+        />
+      )}
+
+      {showDeleteAccountModal && (
+        <DeleteAccountModal
+          userEmail={user ? user.email : ''}
+          onConfirmDelete={handleDeleteAccount}
+          onClose={() => setShowDeleteAccountModal(false)}
         />
       )}
 
       {showShareModal && (
-        <ShareModal 
+        <ShareModal
           steps={totalDailySteps}
           goal={profile.dailyGoal}
           caloriesData={caloriesData}
           streakDays={streakDays}
           profile={profile}
+          elevationM={todayElevationM}
+          elevationSupported={elevationSupported}
           onClose={() => setShowShareModal(false)}
         />
       )}

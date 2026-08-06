@@ -1,9 +1,91 @@
 /**
- * PacePulse AI - Pure Firebase Cloud Firestore Database & Real-Time Sync Service
+ * PacePulse AI - Firebase Authentication + Cloud Firestore Database Service
  */
+import { initializeApp } from 'firebase/app';
+import {
+  getAuth,
+  signInWithEmailAndPassword,
+  signInWithCustomToken,
+  signOut as firebaseSignOut,
+  deleteUser,
+  createUserWithEmailAndPassword
+} from 'firebase/auth';
+
+/**
+ * Public, safe-to-ship Firebase Web App config (NOT a secret - unlike the
+ * Admin SDK service-account key used only in netlify/functions/*).
+ * Fill these in from Firebase Console -> Project Settings -> Your apps -> Web app.
+ */
+const firebaseConfig = {
+  apiKey: 'AIzaSyCyw8ntKlVJyrR_22SxaE0jVdaI5nGcI2Y',
+  authDomain: 'pacepulse-ai.firebaseapp.com',
+  projectId: 'pacepulse-ai',
+  storageBucket: 'pacepulse-ai.firebasestorage.app',
+  messagingSenderId: '930426837446',
+  appId: '1:930426837446:web:190493214d1f226ae87ac7'
+};
+
+const firebaseApp = initializeApp(firebaseConfig);
+export const auth = getAuth(firebaseApp);
 
 const FIRESTORE_PROJECT_ID = 'pacepulse-ai';
 const FIRESTORE_REST_BASE = `https://firestore.googleapis.com/v1/projects/${FIRESTORE_PROJECT_ID}/databases/(default)/documents`;
+
+/**
+ * All Firestore REST calls must go through this wrapper now that security rules
+ * require a real signed-in identity (`request.auth != null`) for every read/write -
+ * it attaches the current Firebase ID token as a Bearer header. Plain anonymous
+ * `fetch()` calls to Firestore will be rejected with a permission error.
+ */
+async function firestoreFetch(url, options = {}) {
+  const headers = { ...(options.headers || {}) };
+  try {
+    if (auth.currentUser) {
+      const token = await auth.currentUser.getIdToken();
+      headers.Authorization = `Bearer ${token}`;
+    }
+  } catch (e) {}
+  return fetch(url, { ...options, headers });
+}
+
+export async function signOut() {
+  try {
+    await firebaseSignOut(auth);
+  } catch (e) {}
+  return true;
+}
+
+/**
+ * Legacy Password Hash Verification (PBKDF2-SHA256 via the browser's Web Crypto
+ * API) - ONLY used to verify pre-migration accounts (created before real Firebase
+ * Authentication was adopted) during their one-time migration in loginUserInDb.
+ * New accounts never touch this - Firebase Auth owns all credential storage now.
+ */
+const PBKDF2_ITERATIONS = 100000;
+
+function bufferToHex(buffer) {
+  return Array.from(new Uint8Array(buffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function hexToBuffer(hex) {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < bytes.length; i++) {
+    bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
+  }
+  return bytes;
+}
+
+async function derivePasswordHash(password, saltHex) {
+  const enc = new TextEncoder();
+  const salt = saltHex ? hexToBuffer(saltHex) : crypto.getRandomValues(new Uint8Array(16));
+  const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveBits']);
+  const derivedBits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt, iterations: PBKDF2_ITERATIONS, hash: 'SHA-256' },
+    keyMaterial,
+    256
+  );
+  return { hash: bufferToHex(derivedBits), salt: bufferToHex(salt) };
+}
 
 /**
  * Local Account Cache Purge Helper
@@ -33,7 +115,7 @@ export function purgeLocalDbAccount(email) {
 /**
  * Save Daily Step Log to Firestore Database (Includes 24 Hourly Buckets!)
  */
-export async function saveDailyLogsToDb(uid, dateStr, totalSteps, goal, caloriesData, hourlyData) {
+export async function saveDailyLogsToDb(uid, dateStr, totalSteps, goal, caloriesData, hourlyData, elevationGainM = 0) {
   if (!uid || uid === 'guest') return;
 
   try {
@@ -62,6 +144,7 @@ export async function saveDailyLogsToDb(uid, dateStr, totalSteps, goal, calories
         goal: { integerValue: String(goal) },
         activeKcal: { integerValue: String(computedKcal) },
         distanceKm: { doubleValue: Number(computedDist) },
+        elevationGainM: { doubleValue: Number(elevationGainM) || 0 },
         updatedAt: { stringValue: new Date().toISOString() },
         hourly: {
           arrayValue: {
@@ -74,7 +157,7 @@ export async function saveDailyLogsToDb(uid, dateStr, totalSteps, goal, calories
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 6000);
 
-    const res = await fetch(`${FIRESTORE_REST_BASE}/users/${uid}/daily_logs/${dateStr}`, {
+    const res = await firestoreFetch(`${FIRESTORE_REST_BASE}/users/${uid}/daily_logs/${dateStr}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(firestoreBody),
@@ -90,229 +173,157 @@ export async function saveDailyLogsToDb(uid, dateStr, totalSteps, goal, calories
 }
 
 /**
- * Register User EXCLUSIVELY in Firebase Cloud Firestore Database ('users' collection)
+ * Fetches a user's Firestore profile doc (users/{uid}) and shapes it into the
+ * app's expected user object. Falls back to sane defaults if the doc is missing.
  */
-export async function registerUserInDb(email, password, displayName, profile) {
-  const cleanEmail = email.trim().toLowerCase();
-  const cleanPassword = password.trim();
-  const uid = `usr_${cleanEmail.replace(/[^a-z0-9]/g, '_')}`;
-  const todayStr = new Date().toISOString().split('T')[0];
-
-  // 1. Always check Cloud Firestore Database first for existing email
+export async function fetchUserProfileDoc(uid, fallbackEmail) {
+  const rawTag = fallbackEmail.split('@')[0].replace(/[^a-z0-9]/g, '');
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 6000);
-    const checkRes = await fetch(`${FIRESTORE_REST_BASE}/users/${uid}`, { signal: controller.signal }).catch(() => null);
-    clearTimeout(timeoutId);
-
-    if (checkRes && checkRes.ok) {
-      throw new Error('An account with this email address already exists in the Cloud Database. Please sign in instead.');
-    }
-  } catch (err) {
-    if (err.message && err.message.includes('already exists')) {
-      throw err;
-    }
-  }
-
-  // Generate Unique Handle/Tag e.g. @nevil3
-  const rawTag = cleanEmail.split('@')[0].replace(/[^a-z0-9]/g, '');
-  const username = `@${rawTag}`;
-
-  const fullProfile = {
-    ...profile,
-    name: displayName.trim(),
-    email: cleanEmail,
-    username
-  };
-
-  const userData = {
-    uid,
-    displayName: displayName.trim(),
-    email: cleanEmail,
-    username,
-    password: cleanPassword,
-    createdAt: new Date().toISOString(),
-    profile: fullProfile
-  };
-
-  // 2. Direct Cloud Firestore User Document Creation
-  const firestoreBody = {
-    fields: {
-      uid: { stringValue: uid },
-      displayName: { stringValue: displayName.trim() },
-      email: { stringValue: cleanEmail },
-      username: { stringValue: username },
-      password: { stringValue: cleanPassword },
-      createdAt: { stringValue: userData.createdAt },
-      profile: {
-        mapValue: {
-          fields: {
-            name: { stringValue: displayName.trim() },
-            email: { stringValue: cleanEmail },
-            username: { stringValue: username },
-            gender: { stringValue: profile.gender || 'male' },
-            birthDate: { stringValue: profile.birthDate || '2000-01-01' },
-            age: { integerValue: String(profile.age || 25) },
-            heightCm: { doubleValue: Number(profile.heightCm || 175) },
-            weightKg: { doubleValue: Number(profile.weightKg || 70) },
-            dailyGoal: { integerValue: String(profile.dailyGoal || 10000) }
-          }
+    const res = await firestoreFetch(`${FIRESTORE_REST_BASE}/users/${uid}`);
+    if (res && res.ok) {
+      const docData = await res.json();
+      const f = docData.fields || {};
+      const pFields = f.profile && f.profile.mapValue ? f.profile.mapValue.fields : {};
+      return {
+        uid,
+        displayName: f.displayName ? f.displayName.stringValue : fallbackEmail.split('@')[0],
+        email: f.email ? f.email.stringValue : fallbackEmail,
+        username: f.username ? f.username.stringValue : `@${rawTag}`,
+        createdAt: f.createdAt ? f.createdAt.stringValue : new Date().toISOString(),
+        profile: {
+          name: pFields.name ? pFields.name.stringValue : fallbackEmail.split('@')[0],
+          email: fallbackEmail,
+          username: f.username ? f.username.stringValue : `@${rawTag}`,
+          gender: pFields.gender ? pFields.gender.stringValue : 'male',
+          birthDate: pFields.birthDate ? pFields.birthDate.stringValue : '2000-01-01',
+          age: pFields.age ? Number(pFields.age.integerValue || 25) : 25,
+          heightCm: pFields.heightCm ? Number(pFields.heightCm.doubleValue || 175) : 175,
+          weightKg: pFields.weightKg ? Number(pFields.weightKg.doubleValue || 70) : 70,
+          dailyGoal: pFields.dailyGoal ? Number(pFields.dailyGoal.integerValue || 10000) : 10000
         }
-      }
+      };
+    }
+  } catch (e) {}
+
+  return {
+    uid,
+    displayName: fallbackEmail.split('@')[0],
+    email: fallbackEmail,
+    username: `@${rawTag}`,
+    createdAt: new Date().toISOString(),
+    profile: {
+      name: fallbackEmail.split('@')[0], email: fallbackEmail, username: `@${rawTag}`,
+      gender: 'male', birthDate: '2000-01-01', age: 25, heightCm: 175, weightKg: 70, dailyGoal: 10000
     }
   };
-
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 6000);
-
-  const createRes = await fetch(`${FIRESTORE_REST_BASE}/users/${uid}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(firestoreBody),
-    signal: controller.signal
-  }).catch(() => null);
-
-  clearTimeout(timeoutId);
-
-  if (!createRes || !createRes.ok) {
-    throw new Error('Cloud Database registration failed. Please check your internet connection and try again.');
-  }
-
-  // Cache locally for offline convenience
-  const localAccounts = getLocalDbAccounts();
-  localAccounts[cleanEmail] = userData;
-  saveLocalDbAccounts(localAccounts);
-
-  const emptyHourly = Array.from({ length: 24 }, (_, i) => ({
-    hour: i,
-    label: `${i.toString().padStart(2, '0')}:00`,
-    steps: 0
-  }));
-
-  await saveDailyLogsToDb(uid, todayStr, 0, profile.dailyGoal || 10000, null, emptyHourly);
-
-  return userData;
 }
 
 /**
- * Sign In User EXCLUSIVELY with Cloud Firestore Database Lookup
+ * One-time migration for accounts created before real Firebase Authentication was
+ * adopted: mints a real Firebase Auth account (the password was already verified
+ * against the legacy hash by the caller), copies the Firestore doc + subcollections
+ * to the new uid (fixing up reverse friend references), then deletes the old doc.
+ */
+async function migrateLegacyAccountToFirebaseAuth(oldUid, cleanEmail, cleanPassword, legacyFields) {
+  const cred = await createUserWithEmailAndPassword(auth, cleanEmail, cleanPassword);
+  const newUid = cred.user.uid;
+
+  const { passwordHash, passwordSalt, password, ...profileFields } = legacyFields;
+  profileFields.uid = { stringValue: newUid };
+  await firestoreFetch(`${FIRESTORE_REST_BASE}/users/${newUid}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fields: profileFields })
+  }).catch(() => {});
+
+  for (const subcollection of ['daily_logs', 'pending_requests', 'friends']) {
+    const docs = await listSubcollectionDocs(oldUid, subcollection);
+    for (const doc of docs) {
+      const docId = doc.name.split('/').pop();
+      await firestoreFetch(`${FIRESTORE_REST_BASE}/users/${newUid}/${subcollection}/${docId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fields: doc.fields || {} })
+      }).catch(() => {});
+
+      if (subcollection === 'friends') {
+        const friendUid = docId;
+        const reverseDocs = await listSubcollectionDocs(friendUid, 'friends');
+        const reverseDoc = reverseDocs.find(d => d.name.split('/').pop() === oldUid);
+        if (reverseDoc) {
+          await firestoreFetch(`${FIRESTORE_REST_BASE}/users/${friendUid}/friends/${newUid}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fields: { ...(reverseDoc.fields || {}), id: { stringValue: newUid } } })
+          }).catch(() => {});
+          await deleteFirestoreDocByUrl(`${FIRESTORE_REST_BASE}/users/${friendUid}/friends/${oldUid}`);
+        }
+      }
+
+      await deleteFirestoreDocByUrl(`https://firestore.googleapis.com/v1/${doc.name}`);
+    }
+  }
+
+  await deleteFirestoreDocByUrl(`${FIRESTORE_REST_BASE}/users/${oldUid}`);
+
+  return newUid;
+}
+
+async function listSubcollectionDocs(uid, subcollection) {
+  try {
+    const res = await firestoreFetch(`${FIRESTORE_REST_BASE}/users/${uid}/${subcollection}`).catch(() => null);
+    if (res && res.ok) {
+      const data = await res.json();
+      return data.documents || [];
+    }
+  } catch (e) {}
+  return [];
+}
+
+/**
+ * Sign In User with Real Firebase Authentication
  */
 export async function loginUserInDb(email, password) {
   const cleanEmail = email.trim().toLowerCase();
   const cleanPassword = password.trim();
-  const uid = `usr_${cleanEmail.replace(/[^a-z0-9]/g, '_')}`;
 
-  // Direct Cloud Firestore Database Lookup
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 6000);
+    const cred = await signInWithEmailAndPassword(auth, cleanEmail, cleanPassword);
+    const user = await fetchUserProfileDoc(cred.user.uid, cleanEmail);
+    return { success: true, user };
+  } catch (err) {
+    if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password') {
+      // Might be a legacy pre-migration account - check for one and migrate if the password matches
+      const legacyUid = `usr_${cleanEmail.replace(/[^a-z0-9]/g, '_')}`;
+      try {
+        const res = await firestoreFetch(`${FIRESTORE_REST_BASE}/users/${legacyUid}`);
+        if (res && res.ok) {
+          const docData = await res.json();
+          const f = docData.fields || {};
+          const dbPasswordHash = f.passwordHash ? f.passwordHash.stringValue : '';
+          const dbPasswordSalt = f.passwordSalt ? f.passwordSalt.stringValue : '';
 
-    const res = await fetch(`${FIRESTORE_REST_BASE}/users/${uid}`, { signal: controller.signal }).catch(() => null);
-    clearTimeout(timeoutId);
-
-    // If 404: Account DOES NOT EXIST in Database! Purge local storage cache.
-    if (res && res.status === 404) {
-      purgeLocalDbAccount(cleanEmail);
-      return { 
-        success: false, 
-        error: 'No account found with this email in Cloud Database. Account may have been removed or does not exist.' 
-      };
-    }
-
-    if (res && res.ok) {
-      const docData = await res.json();
-      if (docData && docData.fields) {
-        const f = docData.fields;
-        const pFields = f.profile && f.profile.mapValue ? f.profile.mapValue.fields : {};
-        const rawTag = cleanEmail.split('@')[0].replace(/[^a-z0-9]/g, '');
-
-        const dbPassword = f.password ? f.password.stringValue : '';
-
-        if (dbPassword && dbPassword !== cleanPassword) {
-          return { success: false, error: 'Incorrect password. Please try again.' };
-        }
-
-        const fetchedUser = {
-          uid: f.uid ? f.uid.stringValue : uid,
-          displayName: f.displayName ? f.displayName.stringValue : cleanEmail.split('@')[0],
-          email: f.email ? f.email.stringValue : cleanEmail,
-          username: f.username ? f.username.stringValue : `@${rawTag}`,
-          password: dbPassword,
-          createdAt: f.createdAt ? f.createdAt.stringValue : new Date().toISOString(),
-          profile: {
-            name: pFields.name ? pFields.name.stringValue : cleanEmail.split('@')[0],
-            email: cleanEmail,
-            username: f.username ? f.username.stringValue : `@${rawTag}`,
-            gender: pFields.gender ? pFields.gender.stringValue : 'male',
-            birthDate: pFields.birthDate ? pFields.birthDate.stringValue : '2000-01-01',
-            age: pFields.age ? Number(pFields.age.integerValue || 25) : 25,
-            heightCm: pFields.heightCm ? Number(pFields.heightCm.doubleValue || 175) : 175,
-            weightKg: pFields.weightKg ? Number(pFields.weightKg.doubleValue || 70) : 70,
-            dailyGoal: pFields.dailyGoal ? Number(pFields.dailyGoal.integerValue || 10000) : 10000
+          if (dbPasswordHash && dbPasswordSalt) {
+            const { hash: attemptHash } = await derivePasswordHash(cleanPassword, dbPasswordSalt);
+            if (attemptHash === dbPasswordHash) {
+              const newUid = await migrateLegacyAccountToFirebaseAuth(legacyUid, cleanEmail, cleanPassword, f);
+              const user = await fetchUserProfileDoc(newUid, cleanEmail);
+              return { success: true, user };
+            }
           }
-        };
+        }
+      } catch (e) {}
 
-        // Sync fresh database user to local storage
-        const localAccounts = getLocalDbAccounts();
-        localAccounts[cleanEmail] = fetchedUser;
-        saveLocalDbAccounts(localAccounts);
-
-        return { success: true, user: fetchedUser };
-      }
+      return { success: false, error: 'Incorrect email or password. Please try again.' };
     }
-  } catch (e) {
+
+    if (err.code === 'auth/too-many-requests') {
+      return { success: false, error: 'Too many failed attempts. Please wait a moment and try again.' };
+    }
+
     return { success: false, error: 'Database network error. Please check your internet connection and try again.' };
   }
-
-  return { 
-    success: false, 
-    error: 'No account found with this email in Cloud Database. Please click "Create New Account" to register.' 
-  };
 }
-
-/**
- * Update User Password in Firebase Cloud Firestore & Local Account Cache
- */
-export async function updateUserPasswordInDb(email, newPassword) {
-  const cleanEmail = email.trim().toLowerCase();
-  const cleanPassword = newPassword.trim();
-  const uid = `usr_${cleanEmail.replace(/[^a-z0-9]/g, '_')}`;
-
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 6000);
-
-    const updateBody = {
-      fields: {
-        password: { stringValue: cleanPassword }
-      }
-    };
-
-    const res = await fetch(`${FIRESTORE_REST_BASE}/users/${uid}?updateMask.fieldPaths=password`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updateBody),
-      signal: controller.signal
-    }).catch(() => null);
-
-    clearTimeout(timeoutId);
-
-    // Update local accounts storage cache
-    const localAccounts = getLocalDbAccounts();
-    if (localAccounts[cleanEmail]) {
-      localAccounts[cleanEmail].password = cleanPassword;
-      saveLocalDbAccounts(localAccounts);
-    }
-
-    if (res && res.ok) {
-      return { success: true };
-    }
-  } catch (e) {}
-
-  // Return true if local update succeeded even if network offline
-  return { success: true };
-}
-
 
 /**
  * Validate if a target user exists in Firebase Database (Multi-Field Search)
@@ -333,7 +344,7 @@ export async function validateUserExistsInDb(searchQuery) {
     const timeoutId = setTimeout(() => controller.abort(), 6000);
 
     // 1. Direct Document ID check (usr_...)
-    const directRes = await fetch(`${FIRESTORE_REST_BASE}/users/${docUid}`, { signal: controller.signal }).catch(() => null);
+    const directRes = await firestoreFetch(`${FIRESTORE_REST_BASE}/users/${docUid}`, { signal: controller.signal }).catch(() => null);
     if (directRes && directRes.ok) {
       const docData = await directRes.json();
       if (docData && docData.fields) {
@@ -351,7 +362,7 @@ export async function validateUserExistsInDb(searchQuery) {
     }
 
     // 2. Scan /users collection to match username, email, displayName, or prefix
-    const listRes = await fetch(`${FIRESTORE_REST_BASE}/users`, { signal: controller.signal }).catch(() => null);
+    const listRes = await firestoreFetch(`${FIRESTORE_REST_BASE}/users`, { signal: controller.signal }).catch(() => null);
     clearTimeout(timeoutId);
 
     if (listRes && listRes.ok) {
@@ -469,7 +480,7 @@ export async function sendFriendRequestInDb(senderUser, targetUser) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 8000);
 
-    const res = await fetch(`${FIRESTORE_REST_BASE}/users/${targetUid}/pending_requests/${reqId}`, {
+    const res = await firestoreFetch(`${FIRESTORE_REST_BASE}/users/${targetUid}/pending_requests/${reqId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(firestoreBody),
@@ -497,7 +508,7 @@ export async function getPendingRequestsFromDb(uid) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 6000);
 
-    const res = await fetch(`${FIRESTORE_REST_BASE}/users/${uid}/pending_requests`, { signal: controller.signal }).catch(() => null);
+    const res = await firestoreFetch(`${FIRESTORE_REST_BASE}/users/${uid}/pending_requests`, { signal: controller.signal }).catch(() => null);
     clearTimeout(timeoutId);
 
     if (res && res.ok) {
@@ -587,13 +598,13 @@ export async function acceptFriendRequestInDb(currentUser, reqItem) {
     const timeoutId = setTimeout(() => controller.abort(), 6000);
 
     await Promise.all([
-      fetch(`${FIRESTORE_REST_BASE}/users/${myUid}/friends/${reqItem.fromUid}`, {
+      firestoreFetch(`${FIRESTORE_REST_BASE}/users/${myUid}/friends/${reqItem.fromUid}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fields: { id: { stringValue: reqItem.fromUid }, name: { stringValue: reqItem.name }, email: { stringValue: reqItem.email } } }),
         signal: controller.signal
       }).catch(() => {}),
-      fetch(`${FIRESTORE_REST_BASE}/users/${reqItem.fromUid}/friends/${myUid}`, {
+      firestoreFetch(`${FIRESTORE_REST_BASE}/users/${reqItem.fromUid}/friends/${myUid}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fields: { id: { stringValue: myUid }, name: { stringValue: myName }, email: { stringValue: myEmail } } }),
@@ -617,7 +628,7 @@ export async function declineFriendRequestInDb(uid, reqId) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 6000);
 
-    await fetch(`${FIRESTORE_REST_BASE}/users/${uid}/pending_requests/${reqId}`, {
+    await firestoreFetch(`${FIRESTORE_REST_BASE}/users/${uid}/pending_requests/${reqId}`, {
       method: 'DELETE',
       signal: controller.signal
     }).catch(() => {});
@@ -656,7 +667,7 @@ export async function getFriendsListFromDb(uid) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 6000);
 
-    const res = await fetch(`${FIRESTORE_REST_BASE}/users/${uid}/friends`, { signal: controller.signal }).catch(() => null);
+    const res = await firestoreFetch(`${FIRESTORE_REST_BASE}/users/${uid}/friends`, { signal: controller.signal }).catch(() => null);
     clearTimeout(timeoutId);
 
     if (res && res.ok) {
@@ -682,11 +693,11 @@ export async function getFriendsListFromDb(uid) {
   return localSaved;
 }
 
-export function queueOfflineDailyLog(uid, dateStr, totalSteps, goal, caloriesData, hourlyData) {
+export function queueOfflineDailyLog(uid, dateStr, totalSteps, goal, caloriesData, hourlyData, elevationGainM = 0) {
   try {
     const queueKey = `pacepulse_offline_queue_${uid}`;
     const existing = JSON.parse(localStorage.getItem(queueKey) || '[]');
-    const item = { uid, dateStr, totalSteps, goal, caloriesData, hourlyData, timestamp: Date.now() };
+    const item = { uid, dateStr, totalSteps, goal, caloriesData, hourlyData, elevationGainM, timestamp: Date.now() };
     const filtered = existing.filter(i => i.dateStr !== dateStr);
     filtered.push(item);
     localStorage.setItem(queueKey, JSON.stringify(filtered));
@@ -702,7 +713,7 @@ export async function flushOfflineSyncQueue(uid) {
     if (!queue || queue.length === 0) return true;
 
     for (const item of queue) {
-      await saveDailyLogsToDb(item.uid, item.dateStr, item.totalSteps, item.goal, item.caloriesData, item.hourlyData);
+      await saveDailyLogsToDb(item.uid, item.dateStr, item.totalSteps, item.goal, item.caloriesData, item.hourlyData, item.elevationGainM || 0);
     }
 
     localStorage.removeItem(queueKey);
@@ -726,11 +737,94 @@ export function removeFriendInDb(uid, friendId) {
   }
 
   try {
-    fetch(`${FIRESTORE_REST_BASE}/users/${uid}/friends/${friendId}`, { method: 'DELETE' });
-    fetch(`${FIRESTORE_REST_BASE}/users/${friendId}/friends/${uid}`, { method: 'DELETE' });
+    firestoreFetch(`${FIRESTORE_REST_BASE}/users/${uid}/friends/${friendId}`, { method: 'DELETE' });
+    firestoreFetch(`${FIRESTORE_REST_BASE}/users/${friendId}/friends/${uid}`, { method: 'DELETE' });
   } catch (e) {}
 
   return updated;
+}
+
+async function deleteFirestoreDocByUrl(url) {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
+    await firestoreFetch(url, { method: 'DELETE', signal: controller.signal }).catch(() => {});
+    clearTimeout(timeoutId);
+  } catch (e) {}
+}
+
+async function listSubcollectionDocIds(uid, subcollection) {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
+    const res = await firestoreFetch(`${FIRESTORE_REST_BASE}/users/${uid}/${subcollection}`, { signal: controller.signal }).catch(() => null);
+    clearTimeout(timeoutId);
+    if (res && res.ok) {
+      const data = await res.json();
+      const docs = data.documents || [];
+      return docs.map(doc => doc.name.split('/').pop());
+    }
+  } catch (e) {}
+  return [];
+}
+
+/**
+ * Permanently Delete a User Account - Cloud Firestore Doc, All Subcollections
+ * (daily_logs, pending_requests, friends), Reverse Friend References on Other
+ * Users, Outstanding Sent Friend Requests, and All Local Device Caches.
+ */
+export async function deleteUserAccountFromDb(uid, email) {
+  if (!uid || uid === 'guest') return { success: false };
+
+  try {
+    // 1. Remove this user from each friend's own friends subcollection (reverse reference)
+    const friendIds = await listSubcollectionDocIds(uid, 'friends');
+    await Promise.all(friendIds.map(friendId =>
+      deleteFirestoreDocByUrl(`${FIRESTORE_REST_BASE}/users/${friendId}/friends/${uid}`)
+    ));
+
+    // 2. Cancel any pending friend requests this user sent to others
+    const outgoing = getOutgoingRequestsFromDb(uid);
+    await Promise.all(outgoing.map(req =>
+      req.toUid ? deleteFirestoreDocByUrl(`${FIRESTORE_REST_BASE}/users/${req.toUid}/pending_requests/${req.id}`) : Promise.resolve()
+    ));
+
+    // 3. Delete this user's own subcollections
+    for (const subcollection of ['friends', 'pending_requests', 'daily_logs']) {
+      const ids = await listSubcollectionDocIds(uid, subcollection);
+      await Promise.all(ids.map(id =>
+        deleteFirestoreDocByUrl(`${FIRESTORE_REST_BASE}/users/${uid}/${subcollection}/${id}`)
+      ));
+    }
+
+    // 4. Delete the user document itself
+    await deleteFirestoreDocByUrl(`${FIRESTORE_REST_BASE}/users/${uid}`);
+  } catch (e) {}
+
+  // 5. Delete the actual Firebase Auth credential (only possible while signed in as
+  // that user, which account deletion always is)
+  if (auth.currentUser && auth.currentUser.uid === uid) {
+    try {
+      await deleteUser(auth.currentUser);
+    } catch (e) {
+      if (e.code === 'auth/requires-recent-login') {
+        return { success: false, error: 'For your security, please sign out and back in, then try deleting your account again.' };
+      }
+    }
+  }
+
+  // 6. Purge every local cache tied to this account
+  if (email) purgeLocalDbAccount(email);
+  try {
+    const keysToRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.includes(uid)) keysToRemove.push(key);
+    }
+    keysToRemove.forEach(k => localStorage.removeItem(k));
+  } catch (e) {}
+
+  return { success: true };
 }
 
 /**
@@ -747,7 +841,7 @@ export async function getTodayStepsForFriends(friendsList, dateStr) {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 4000);
 
-        const res = await fetch(`${FIRESTORE_REST_BASE}/users/${friend.id}/daily_logs/${dateStr}`, {
+        const res = await firestoreFetch(`${FIRESTORE_REST_BASE}/users/${friend.id}/daily_logs/${dateStr}`, {
           signal: controller.signal
         }).catch(() => null);
 
@@ -791,7 +885,7 @@ export async function getDailyLogsFromDb(uid) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 6000);
 
-    const res = await fetch(`${FIRESTORE_REST_BASE}/users/${uid}/daily_logs`, { signal: controller.signal }).catch(() => null);
+    const res = await firestoreFetch(`${FIRESTORE_REST_BASE}/users/${uid}/daily_logs`, { signal: controller.signal }).catch(() => null);
     clearTimeout(timeoutId);
 
     if (res && res.ok) {
@@ -803,6 +897,7 @@ export async function getDailyLogsFromDb(uid) {
           const goalVal = f.goal ? Number(f.goal.integerValue || f.goal.doubleValue || 10000) : 10000;
           const rawKcal = f.activeKcal ? Number(f.activeKcal.integerValue || f.activeKcal.doubleValue || 0) : 0;
           const rawDist = f.distanceKm ? Number(f.distanceKm.doubleValue || f.distanceKm.integerValue || 0) : 0;
+          const elevationGainM = f.elevationGainM ? Number(f.elevationGainM.doubleValue || f.elevationGainM.integerValue || 0) : 0;
 
           const computedKcal = rawKcal > 0 ? rawKcal : Math.round(stepsVal * 0.04);
           const computedDist = rawDist > 0 ? rawDist : Math.round((stepsVal * 0.72) / 10) / 100;
@@ -829,6 +924,7 @@ export async function getDailyLogsFromDb(uid) {
             goal: goalVal,
             activeKcal: computedKcal,
             distanceKm: computedDist,
+            elevationGainM,
             completed: stepsVal >= goalVal && stepsVal > 0,
             hourlyData: hourlyArr
           };
@@ -839,6 +935,3 @@ export async function getDailyLogsFromDb(uid) {
 
   return [];
 }
-
-export const auth = { currentUser: null };
-export async function signOut() { return true; }

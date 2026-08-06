@@ -1,8 +1,9 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { X, Share2, Download, Copy, Check, Sparkles, MessageCircle, Instagram, Camera, Image as ImageIcon, Move } from 'lucide-react';
-import { getCelebrationQuote } from '../utils/fitnessEngine';
+import { getCelebrationQuote, metersToFloors } from '../utils/fitnessEngine';
 
-export function ShareModal({ steps = 0, goal = 10000, streakDays = 1, caloriesData, profile, onClose }) {
+export function ShareModal({ steps = 0, goal = 10000, streakDays = 1, caloriesData, profile, elevationM = 0, elevationSupported = true, onClose }) {
+  const showElevation = elevationSupported && elevationM > 0;
   const canvasRef = useRef(null);
   const fileInputRef = useRef(null);
   const [copied, setCopied] = useState(false);
@@ -153,6 +154,21 @@ export function ShareModal({ steps = 0, goal = 10000, streakDays = 1, caloriesDa
       ctx.fillStyle = isGoalHit ? '#34D399' : '#00F2FE';
       ctx.font = 'bold 18px "Outfit", system-ui, sans-serif';
       ctx.fillText(isGoalHit ? '🎯 GOAL ACHIEVED!' : '⚡ IN PROGRESS', 105, 406);
+
+      // Elevation Gain Pill (only shown when the device supports it & gain > 0)
+      if (showElevation) {
+        ctx.fillStyle = 'rgba(16, 185, 129, 0.18)';
+        ctx.strokeStyle = 'rgba(16, 185, 129, 0.55)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.roundRect(320, 375, 260, 48, 24);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = '#34D399';
+        ctx.font = 'bold 18px "Outfit", system-ui, sans-serif';
+        ctx.fillText(`⛰️ ${Math.round(elevationM)}m • ${metersToFloors(elevationM)} floors`, 340, 406);
+      }
 
       // 4 Metrics Grid (2x2 Grid)
       const gridY = 460;
@@ -352,7 +368,10 @@ export function ShareModal({ steps = 0, goal = 10000, streakDays = 1, caloriesDa
       // Bottom Date & Goal Target Footer
       ctx.fillStyle = '#94A3B8';
       ctx.font = '500 13px "Plus Jakarta Sans", system-ui, sans-serif';
-      ctx.fillText(`Target: ${goal.toLocaleString()} steps • ${new Date().toLocaleDateString()}`, hudX + 24, hudY + 280);
+      const footerText = showElevation
+        ? `Target: ${goal.toLocaleString()} steps • ⛰️ ${metersToFloors(elevationM)} floors • ${new Date().toLocaleDateString()}`
+        : `Target: ${goal.toLocaleString()} steps • ${new Date().toLocaleDateString()}`;
+      ctx.fillText(footerText, hudX + 24, hudY + 280);
 
       if (streakDays >= 1) {
         ctx.fillStyle = '#FF9E44';
@@ -366,7 +385,7 @@ export function ShareModal({ steps = 0, goal = 10000, streakDays = 1, caloriesDa
     } else {
       renderCanvas();
     }
-  }, [steps, goal, streakDays, caloriesData, quote, cardMode, customPhotoDataUrl, overlayPosition]);
+  }, [steps, goal, streakDays, caloriesData, quote, cardMode, customPhotoDataUrl, overlayPosition, elevationM, showElevation]);
 
   // Universal Native Mobile App Sharing (Android WhatsApp Status / Instagram Story)
   const handleUniversalNativeShare = async (platform) => {
@@ -380,8 +399,9 @@ export function ShareModal({ steps = 0, goal = 10000, streakDays = 1, caloriesDa
     const distKm = caloriesData ? caloriesData.distanceKm : 0;
     const isGoalHit = steps >= goal && steps > 0;
     const statusStr = isGoalHit ? '🎯 GOAL ACHIEVED!' : '⚡ IN PROGRESS';
+    const elevationLine = showElevation ? `\n• Elevation Gain: ${Math.round(elevationM)} m (${metersToFloors(elevationM)} floors) ⛰️` : '';
 
-    const caption = `🏃 *PacePulse AI Fitness Update* 🏃\n\n"${quote}"\n\n📊 *Daily Stats (${statusStr}):*\n• Steps: ${steps.toLocaleString()}\n• Active Calories: ${activeKcal} kcal\n• Distance: ${distKm} km\n• Active Streak: ${streakDays} days 🔥\n\nTracked with PacePulse AI! ⚡`;
+    const caption = `🏃 *PacePulse AI Fitness Update* 🏃\n\n"${quote}"\n\n📊 *Daily Stats (${statusStr}):*\n• Steps: ${steps.toLocaleString()}\n• Active Calories: ${activeKcal} kcal\n• Distance: ${distKm} km${elevationLine}\n• Active Streak: ${streakDays} days 🔥\n\nTracked with PacePulse AI! ⚡`;
 
     // 1. Convert Canvas to JPEG format for universal mobile photo gallery compatibility
     const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.95));
@@ -390,11 +410,36 @@ export function ShareModal({ steps = 0, goal = 10000, streakDays = 1, caloriesDa
       return;
     }
 
+    // 2. Inside the native Android wrapper: hand the image straight to WhatsApp Status /
+    // Instagram Stories via real Android share intents (fixes the "page not found" error
+    // caused by trying to navigate the WebView to whatsapp://.../instagram:// URLs).
+    const bridge = window.AndroidStepBridge;
+    if (bridge && (bridge.shareToWhatsAppStatus || bridge.shareToInstagramStory)) {
+      try {
+        await navigator.clipboard.writeText(caption);
+      } catch (err) {}
+
+      const base64Jpeg = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+
+      if (platform === 'whatsapp' && bridge.shareToWhatsAppStatus) {
+        bridge.shareToWhatsAppStatus(base64Jpeg, caption);
+        return;
+      } else if (platform === 'instagram' && bridge.shareToInstagramStory) {
+        bridge.shareToInstagramStory(base64Jpeg);
+        return;
+      }
+    }
+
+    // 3. Plain browser / installed PWA (not the wrapped Android app): download the card
+    // and copy the caption so the user can attach it manually - Web Share API first if available.
     const file = new File([blob], `PacePulse_Progress_${steps}_Steps.jpg`, { type: 'image/jpeg' });
     const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-    const encodedText = encodeURIComponent(caption);
 
-    // 2. Programmatically Download JPEG Card to device gallery
     try {
       const link = document.createElement('a');
       link.download = `PacePulse_Progress_${steps}_Steps.jpg`;
@@ -406,12 +451,10 @@ export function ShareModal({ steps = 0, goal = 10000, streakDays = 1, caloriesDa
       console.log("Card download fallback:", err);
     }
 
-    // 3. Copy formatted caption to Android Clipboard
     try {
       await navigator.clipboard.writeText(caption);
     } catch (err) {}
 
-    // 4. On Mobile (Android/iOS): Try Native Web Share API first (Opens Android Share Sheet with image + text)
     if (isMobile && navigator.share) {
       try {
         if (navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -427,21 +470,7 @@ export function ShareModal({ steps = 0, goal = 10000, streakDays = 1, caloriesDa
       }
     }
 
-    // 5. Direct App Intent Launch for WhatsApp Status & Instagram Story
-    if (platform === 'whatsapp') {
-      alert("📲 Card Image downloaded to Gallery & Caption copied!\n\nOpening WhatsApp... Tap 'My Status' -> Pick top downloaded PacePulse card -> Paste caption!");
-      // Open WhatsApp native protocol on Android
-      window.location.href = `whatsapp://send?text=${encodedText}`;
-      setTimeout(() => {
-        window.open(`https://api.whatsapp.com/send?text=${encodedText}`, '_blank');
-      }, 1000);
-    } else if (platform === 'instagram') {
-      alert("📸 Card Image downloaded to Gallery & Caption copied!\n\nOpening Instagram... Tap '+' -> Story -> Pick top downloaded PacePulse card!");
-      window.location.href = 'instagram://app';
-      setTimeout(() => {
-        window.open('https://www.instagram.com/', '_blank');
-      }, 1000);
-    }
+    alert('📲 Card image downloaded & caption copied! Open WhatsApp or Instagram and attach it from your gallery.');
   };
 
   // Download PNG Card
@@ -457,7 +486,8 @@ export function ShareModal({ steps = 0, goal = 10000, streakDays = 1, caloriesDa
   const handleCopyCaption = () => {
     const activeKcal = caloriesData ? caloriesData.activeKcal : 0;
     const distKm = caloriesData ? caloriesData.distanceKm : 0;
-    const fullCaption = `${quote}\n\nSteps: ${steps.toLocaleString()} | Active Calories: ${activeKcal} kcal | Distance: ${distKm} km | ${streakDays} Day Streak 🔥\n#PacePulseAI #FitnessGoal #StepTracker #WalkingStreak`;
+    const elevationPart = showElevation ? ` | Elevation: ${metersToFloors(elevationM)} floors ⛰️` : '';
+    const fullCaption = `${quote}\n\nSteps: ${steps.toLocaleString()} | Active Calories: ${activeKcal} kcal | Distance: ${distKm} km${elevationPart} | ${streakDays} Day Streak 🔥\n#PacePulseAI #FitnessGoal #StepTracker #WalkingStreak`;
     navigator.clipboard.writeText(fullCaption);
     setCopied(true);
     setTimeout(() => setCopied(false), 2500);

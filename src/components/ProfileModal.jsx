@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { User, Mail, Hash, Copy, Check } from 'lucide-react';
+import { User, Mail, Hash, Copy, Check, Trash2 } from 'lucide-react';
 import { calculateBMR, calculateStrideCm, calculateAgeFromBirthDate } from '../utils/fitnessEngine';
 
-export function ProfileModal({ profile, onSave, onClose }) {
+export function ProfileModal({ profile, user, onSave, onClose, onOpenDeleteAccount }) {
   const [copiedTag, setCopiedTag] = useState(false);
 
   const userTag = profile.username || `@${(profile.email || 'user').split('@')[0].replace(/[^a-z0-9]/g, '')}`;
@@ -494,6 +494,40 @@ export function ProfileModal({ profile, onSave, onClose }) {
             </button>
           </div>
         </form>
+
+        {/* Danger Zone - Permanent Account Deletion */}
+        {user && user.uid && user.uid !== 'guest' && (
+          <div style={{
+            marginTop: '24px',
+            paddingTop: '18px',
+            borderTop: '1px solid rgba(239, 68, 68, 0.2)'
+          }}>
+            <p style={{ fontSize: '11px', fontWeight: '700', color: '#EF4444', letterSpacing: '0.5px', marginBottom: '10px' }}>
+              DANGER ZONE
+            </p>
+            <button
+              type="button"
+              onClick={onOpenDeleteAccount}
+              style={{
+                width: '100%',
+                background: 'rgba(239, 68, 68, 0.08)',
+                border: '1px solid rgba(239, 68, 68, 0.3)',
+                color: '#EF4444',
+                fontWeight: '700',
+                fontSize: '13px',
+                padding: '12px',
+                borderRadius: '14px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px'
+              }}
+            >
+              <Trash2 size={16} /> Delete Account Permanently
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

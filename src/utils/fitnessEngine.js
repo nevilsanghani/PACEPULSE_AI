@@ -82,6 +82,14 @@ export function calculateDistanceKm(steps, strideCm) {
 }
 
 /**
+ * Converts elevation gain in meters to approximate floors climbed (~3m per floor)
+ */
+export function metersToFloors(meters) {
+  const m = parseFloat(meters) || 0;
+  return Math.round((m / 3) * 10) / 10;
+}
+
+/**
  * Calculates active calories burned (STRICTLY EXCLUDES BMR RESTING ENERGY)
  */
 export function calculateCalories(steps, profile, activeMinutes = null, cadence = 100) {

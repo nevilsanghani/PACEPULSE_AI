@@ -18,3 +18,10 @@ scratch/
 Thumbs.db
 .vscode/
 .idea/
+
+# Android build artifacts & machine-specific config
+pacepulse-android/local.properties
+pacepulse-android/.gradle/
+pacepulse-android/app/build/
+pacepulse-android/*.hprof
+pacepulse-android/hs_err_pid*.log

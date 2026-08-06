@@ -1,9 +1,19 @@
 package com.pacepulse.ai
 
+import android.Manifest
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
+import android.content.pm.PackageManager
+import android.os.Build
 import android.util.Log
 import android.webkit.WebView
+import androidx.core.content.ContextCompat
+import com.google.android.gms.location.ActivityRecognition
+import com.google.android.gms.location.ActivityTransition
+import com.google.android.gms.location.ActivityTransitionRequest
+import com.google.android.gms.location.DetectedActivity
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -11,15 +21,80 @@ import java.util.Locale
 /**
  * PacePulse AI - Absolute 24/7 Monotonic Hardware Step Counter Engine
  * Guarantees step counts NEVER decrease and tracks walking 100% accurately per user.
+ * Rejects hardware step-counter increments that occur while Activity Recognition
+ * classifies the user as IN_VEHICLE (e.g. riding in an auto/car), so vehicle vibration
+ * never inflates the day's step count.
  */
 object NativeStepManager {
 
-    private const val PREFS_NAME = "pacepulse_hardware_prefs"
+    const val PREFS_NAME = "pacepulse_hardware_prefs"
+    const val KEY_MOTION_STATE = "current_motion_state"
+    const val KEY_MOTION_STATE_UPDATED_AT = "motion_state_updated_at"
+
+    // No human takes more than this many real steps between two TYPE_STEP_COUNTER
+    // events (which fire per-step) - defends against a single garbage sensor burst.
+    private const val MAX_DELTA_PER_TICK = 20f
+    private const val MOTION_TRANSITION_REQUEST_CODE = 4001
+
     private var activeUid: String = "guest"
     private var lastKnownHardwareTotal: Float = -1f
 
     private fun getTodayStr(): String {
         return SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+    }
+
+    /**
+     * Registers Activity Recognition Transition updates so we can tell WALKING/RUNNING
+     * apart from IN_VEHICLE/ON_BICYCLE/STILL. Safe to call repeatedly (idempotent) from
+     * both MainActivity and StepTrackingService - re-registering with the same request
+     * code just replaces the prior registration.
+     */
+    fun registerMotionTransitionUpdates(context: Context) {
+        val hasPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACTIVITY_RECOGNITION) == PackageManager.PERMISSION_GRANTED
+        } else {
+            true // No runtime permission needed pre-Android 10; manifest permission covers it.
+        }
+        if (!hasPermission) {
+            Log.w("PacePulseNative", "Skipping motion transition registration - ACTIVITY_RECOGNITION not granted yet")
+            return
+        }
+
+        try {
+            val transitions = listOf(
+                DetectedActivity.STILL,
+                DetectedActivity.WALKING,
+                DetectedActivity.RUNNING,
+                DetectedActivity.IN_VEHICLE,
+                DetectedActivity.ON_BICYCLE
+            ).map { type ->
+                ActivityTransition.Builder()
+                    .setActivityType(type)
+                    .setActivityTransition(ActivityTransition.ACTIVITY_TRANSITION_ENTER)
+                    .build()
+            }
+
+            val request = ActivityTransitionRequest(transitions)
+
+            val receiverIntent = Intent(context, MotionStateReceiver::class.java)
+            val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            } else {
+                PendingIntent.FLAG_UPDATE_CURRENT
+            }
+            val pendingIntent = PendingIntent.getBroadcast(context, MOTION_TRANSITION_REQUEST_CODE, receiverIntent, flags)
+
+            ActivityRecognition.getClient(context)
+                .requestActivityTransitionUpdates(request, pendingIntent)
+                .addOnSuccessListener {
+                    Log.d("PacePulseNative", "Motion transition updates registered")
+                }
+                .addOnFailureListener { e ->
+                    Log.w("PacePulseNative", "Motion transition registration failed: ${e.message}")
+                }
+        } catch (e: Exception) {
+            Log.w("PacePulseNative", "Motion transition registration error: ${e.message}")
+        }
     }
 
     private fun sanitizeUid(uid: String?): String {
@@ -65,6 +140,7 @@ object NativeStepManager {
 
     @Synchronized
     fun processCumulativeStep(context: Context, currentTotal: Float, webView: WebView?): Int {
+        val previousHardwareTotal = lastKnownHardwareTotal
         lastKnownHardwareTotal = currentTotal
 
         val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -86,6 +162,20 @@ object NativeStepManager {
                 .putInt(keySteps, 0)
                 .apply()
             Log.d("PacePulseNative", "New Day Baseline Saved: $midnightBaseline for user $activeUid on $todayStr")
+        } else if (previousHardwareTotal >= 0f) {
+            // Reject hardware step-counter increments that occurred while Activity
+            // Recognition says the user is riding in a vehicle (vibration false
+            // positives, e.g. an auto-rickshaw) by advancing the baseline forward so
+            // those ticks are excluded today AND never resurface later.
+            val motionState = prefs.getInt(KEY_MOTION_STATE, DetectedActivity.UNKNOWN)
+            if (motionState == DetectedActivity.IN_VEHICLE) {
+                val instantDelta = (currentTotal - previousHardwareTotal).coerceIn(0f, MAX_DELTA_PER_TICK)
+                if (instantDelta > 0f) {
+                    midnightBaseline += instantDelta
+                    prefs.edit().putFloat(keyBaseline, midnightBaseline).apply()
+                    Log.d("PacePulseNative", "Excluded $instantDelta vehicle-vibration steps for user $activeUid")
+                }
+            }
         }
 
         // Compute absolute steps taken today from hardware sensor
