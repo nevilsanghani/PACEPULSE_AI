@@ -45,6 +45,13 @@ export const handler = async (event) => {
     return jsonResponse(200, { sent: true });
   } catch (err) {
     console.error('send-signup-otp error:', err);
-    return jsonResponse(500, { error: 'Something went wrong. Please try again.', debug: String(err && err.message || err) });
+    let saDiag = 'MISSING';
+    try {
+      const parsed = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT || '');
+      saDiag = `project_id=${parsed.project_id} client_email=${parsed.client_email} key_len=${(parsed.private_key || '').length} key_prefix_ok=${(parsed.private_key || '').startsWith('-----BEGIN')}`;
+    } catch (e) {
+      saDiag = `PARSE_ERROR: ${e.message}`;
+    }
+    return jsonResponse(500, { error: 'Something went wrong. Please try again.', debug: String(err && err.message || err), saDiag });
   }
 };
