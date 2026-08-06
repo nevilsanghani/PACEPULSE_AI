@@ -7,10 +7,13 @@ import {
   signInWithEmailAndPassword,
   signOut as firebaseSignOut,
   deleteUser,
-  createUserWithEmailAndPassword,
-  sendEmailVerification,
-  sendPasswordResetEmail
+  createUserWithEmailAndPassword
 } from 'firebase/auth';
+
+// PacePulse AI has no public web frontend - this Worker is called directly by
+// the Android (and future Mac) app's WebView, which is always a different origin,
+// so relative fetch URLs would not resolve correctly.
+const OTP_WORKER_BASE = 'https://pacepulse-otp.pacepulseai.workers.dev';
 
 /**
  * Public, safe-to-ship Firebase Web App config (not a secret - this is meant to
@@ -58,16 +61,46 @@ export async function signOut() {
 }
 
 /**
- * Create a real Firebase Authentication account and immediately trigger Firebase's
- * own built-in email verification flow (Authentication -> Templates in the Firebase
- * Console controls the branding/sender name/subject/body of that email). No custom
- * backend is involved - Google's own servers send and validate the link, which is
- * what makes this unbypassable from client-side JS, same guarantee the old
- * Netlify-based OTP functions provided, just without a third-party dependency.
+ * Step 1 of signup: ask the Cloudflare Worker to generate a 4-digit code, store it
+ * server-side, and email it via EmailJS. The account is NOT created yet - it only
+ * gets created (see verifySignupOtpAndCreateAccount) once the server confirms the
+ * code was entered correctly, which is what makes this unbypassable from client JS.
  */
-export async function registerUserInDb(email, password, displayName, profile) {
+export async function sendSignupOtp(email, displayName) {
+  const cleanEmail = email.trim().toLowerCase();
+  try {
+    const res = await fetch(`${OTP_WORKER_BASE}/send-signup-otp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: cleanEmail, displayName })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return { success: false, error: data.error || 'Could not send the verification email right now.' };
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: 'Network error. Please check your connection and try again.' };
+  }
+}
+
+/**
+ * Step 2 of signup: the Worker verifies the code server-side; only if it confirms
+ * success do we create the real Firebase Auth account and its Firestore profile doc.
+ */
+export async function verifySignupOtpAndCreateAccount(email, code, password, displayName, profile) {
   const cleanEmail = email.trim().toLowerCase();
   const cleanPassword = password.trim();
+
+  try {
+    const res = await fetch(`${OTP_WORKER_BASE}/verify-signup-otp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: cleanEmail, code })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.verified) return { success: false, error: data.error || 'Verification failed.' };
+  } catch (e) {
+    return { success: false, error: 'Network error. Please check your connection and try again.' };
+  }
 
   let cred;
   try {
@@ -75,12 +108,6 @@ export async function registerUserInDb(email, password, displayName, profile) {
   } catch (err) {
     if (err.code === 'auth/email-already-in-use') {
       return { success: false, error: 'An account with this email address already exists. Please sign in instead.' };
-    }
-    if (err.code === 'auth/invalid-email') {
-      return { success: false, error: 'Please enter a valid email address.' };
-    }
-    if (err.code === 'auth/weak-password') {
-      return { success: false, error: 'Password is too weak. Please choose a stronger password.' };
     }
     return { success: false, error: 'Account creation failed. Please check your connection and try again.' };
   }
@@ -104,62 +131,70 @@ export async function registerUserInDb(email, password, displayName, profile) {
     })
   }).catch(() => {});
 
-  let verificationSent = true;
-  try {
-    await sendEmailVerification(cred.user);
-  } catch (e) {
-    verificationSent = false;
-  }
-
   return {
     success: true,
-    verificationSent,
     user: { uid, displayName: displayName.trim(), email: cleanEmail, username, profile: fullProfile }
   };
 }
 
-/** Re-sends the verification email to whoever is currently signed in. */
-export async function resendVerificationEmail() {
-  if (!auth.currentUser) return { success: false, error: 'You need to be signed in to resend a verification email.' };
+/** Asks the Worker to send a password-reset code via EmailJS. */
+export async function sendResetOtp(email) {
+  const cleanEmail = email.trim().toLowerCase();
   try {
-    await sendEmailVerification(auth.currentUser);
+    const res = await fetch(`${OTP_WORKER_BASE}/send-reset-otp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: cleanEmail })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return { success: false, error: data.error || `No account found matching email "${cleanEmail}".` };
     return { success: true };
-  } catch (err) {
-    if (err.code === 'auth/too-many-requests') {
-      return { success: false, error: 'Too many requests. Please wait a moment before requesting another email.' };
-    }
-    return { success: false, error: 'Could not resend the verification email right now. Please try again.' };
+  } catch (e) {
+    return { success: false, error: 'Network error. Please check your connection and try again.' };
   }
-}
-
-/** Refreshes the current user's record from Firebase and reports whether they've verified their email yet. */
-export async function checkEmailVerified() {
-  if (!auth.currentUser) return false;
-  try {
-    await auth.currentUser.reload();
-  } catch (e) {}
-  return !!auth.currentUser.emailVerified;
 }
 
 /**
- * Sends Firebase's own built-in password-reset email - the user sets their new
- * password directly on Firebase's secure hosted page reached via that email's link,
- * so no custom backend ever sees or handles the new password in transit.
+ * Checks the reset code alone (without consuming it) so the UI can show an
+ * immediate error before asking for a new password, instead of only finding out
+ * the code was wrong after the user has already filled out the next screen.
  */
-export async function requestPasswordReset(email) {
+export async function verifyResetOtp(email, code) {
   const cleanEmail = email.trim().toLowerCase();
   try {
-    await sendPasswordResetEmail(auth, cleanEmail);
+    const res = await fetch(`${OTP_WORKER_BASE}/verify-reset-otp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: cleanEmail, code })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.verified) return { success: false, error: data.error || 'Invalid reset code.' };
     return { success: true };
-  } catch (err) {
-    if (err.code === 'auth/user-not-found') {
-      return { success: false, error: `No account found matching email "${cleanEmail}".` };
-    }
-    if (err.code === 'auth/too-many-requests') {
-      return { success: false, error: 'Too many requests. Please wait a moment and try again.' };
-    }
+  } catch (e) {
     return { success: false, error: 'Network error. Please check your connection and try again.' };
   }
+}
+
+/**
+ * Sends the code + new password together - the Worker verifies the code server-side
+ * and only then updates the Firebase Auth password via an Admin-authenticated call,
+ * then we sign the user in with their new password to get a real session.
+ */
+export async function confirmPasswordReset(email, code, newPassword) {
+  const cleanEmail = email.trim().toLowerCase();
+  try {
+    const res = await fetch(`${OTP_WORKER_BASE}/confirm-password-reset`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: cleanEmail, code, newPassword })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success) return { success: false, error: data.error || 'Password reset failed. Please try again.' };
+  } catch (e) {
+    return { success: false, error: 'Network error. Please check your connection and try again.' };
+  }
+
+  return loginUserInDb(cleanEmail, newPassword);
 }
 
 /** Converts a plain JS object into Firestore REST API's typed field format (flat values only). */

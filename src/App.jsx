@@ -147,10 +147,6 @@ export default function App() {
   // Show Auth Modal if not logged in
   const [showAuthModal, setShowAuthModal] = useState(!user);
 
-  // Set when a real Firebase session exists but hasn't clicked its email
-  // verification link yet - opens AuthModal straight into the "check your email" step.
-  const [pendingVerificationEmail, setPendingVerificationEmail] = useState(null);
-
   // Pending connection requests for Notification Dot & Modal
   const [pendingRequestsList, setPendingRequestsList] = useState([]);
   const [lastReadTime, setLastReadTime] = useState(() => {
@@ -465,14 +461,6 @@ export default function App() {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
-        if (!firebaseUser.emailVerified) {
-          // Real session, but they haven't clicked the verification link yet -
-          // don't let them into the app, send them to the "check your email" step.
-          setPendingVerificationEmail(firebaseUser.email || '');
-          setShowAuthModal(true);
-          return;
-        }
-        setPendingVerificationEmail(null);
         if (!userRef.current || userRef.current.uid !== firebaseUser.uid) {
           const freshUser = await fetchUserProfileDoc(firebaseUser.uid, firebaseUser.email || '');
           await handleAuthSuccess(freshUser);
@@ -731,7 +719,6 @@ export default function App() {
         <AuthModal
           onSuccess={handleAuthSuccess}
           onClose={() => setShowAuthModal(false)}
-          initialUnverifiedEmail={pendingVerificationEmail}
         />
       )}
     </div>
