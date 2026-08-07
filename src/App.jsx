@@ -199,6 +199,14 @@ export default function App() {
     lastNativeTotalRef.current = null;
     refreshPendingRequests();
 
+    // Retry any save left queued from a previous session (e.g. a save that
+    // failed to the cold-start auth race) on every app start, not only on a
+    // browser 'online' event - the device may never have actually gone
+    // offline, so that event might never fire to trigger the retry otherwise.
+    flushOfflineSyncQueue(user.uid).then(flushed => {
+      if (flushed) setCloudSyncStatus('synced');
+    });
+
     // Fetch remote logs from Cloud Firestore for weekly chart & history
     getDailyLogsFromDb(user.uid).then(remoteLogs => {
       if (remoteLogs && remoteLogs.length > 0) {

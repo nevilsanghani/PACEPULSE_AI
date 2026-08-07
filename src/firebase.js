@@ -63,6 +63,14 @@ async function firestoreFetch(url, options = {}) {
   let tokenError = null;
 
   try {
+    // Right after a cold app start, Firebase Auth needs a moment to finish
+    // restoring the persisted session internally - a call that fires before
+    // that finishes sees auth.currentUser as null even though a real session
+    // exists, sends no identity, and gets rejected by Firestore's rules.
+    // authStateReady() resolves once that initial check is done (immediately,
+    // if it already was) so this never sends an unauthenticated request while
+    // a real session is still loading.
+    await auth.authStateReady();
     if (auth.currentUser) {
       const token = await auth.currentUser.getIdToken();
       headers.Authorization = `Bearer ${token}`;
