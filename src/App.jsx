@@ -78,7 +78,10 @@ export default function App() {
   const [isAudioMuted, setIsMuted] = useState(false);
 
   const todayStr = new Date().toISOString().split('T')[0];
-  const [cloudSyncStatus, setCloudSyncStatus] = useState(navigator.onLine ? 'synced' : 'offline');
+  // Starts optimistic rather than trusting navigator.onLine (unreliable in
+  // Android WebView) - the sync effect below corrects this almost immediately
+  // based on what a real Firestore write actually does, not a heuristic.
+  const [cloudSyncStatus, setCloudSyncStatus] = useState('synced');
 
   // 24-Hour Step Breakdown Array (Date-scoped to prevent carrying forward yesterday's steps)
   const [hourlyData, setHourlyData] = useState(() => {
@@ -302,41 +305,34 @@ export default function App() {
 
     lastSyncedRef.current = { steps: totalDailySteps, date: todayStr, uid: user.uid, goal: profile.dailyGoal, elevation: todayElevationM };
 
-    if (navigator.onLine) {
-      setCloudSyncStatus('syncing');
-      saveDailyLogsToDb(
-        user.uid,
-        todayStr,
-        totalDailySteps,
-        profile.dailyGoal,
-        caloriesData,
-        hourlyData,
-        todayElevationM
-      ).then((ok) => {
-        // A failed write (timeout, permission hiccup, WebView network flakiness)
-        // used to be silently dropped here with no retry and a false "synced"
-        // status - queue it for the next 'online' event instead, same as an
-        // actually-offline write, so a transient failure can't permanently
-        // lose a day's data before the local queue itself gets wiped.
-        if (ok) {
-          setCloudSyncStatus('synced');
-        } else {
-          queueOfflineDailyLog(user.uid, todayStr, totalDailySteps, profile.dailyGoal, caloriesData, hourlyData, todayElevationM);
-          setCloudSyncStatus('offline');
-        }
-      });
-    } else {
-      queueOfflineDailyLog(
-        user.uid,
-        todayStr,
-        totalDailySteps,
-        profile.dailyGoal,
-        caloriesData,
-        hourlyData,
-        todayElevationM
-      );
-      setCloudSyncStatus('offline');
-    }
+    // Always attempt the live write and react to what actually happens, rather
+    // than pre-checking navigator.onLine first - Android WebView's onLine state
+    // is known to be unreliable (it can report false even with a perfectly good
+    // connection, especially right after a cold app start), and pre-gating on it
+    // was skipping real, working syncs and permanently mislabeling them "Offline"
+    // even while other Firestore calls were succeeding in the same session.
+    setCloudSyncStatus('syncing');
+    saveDailyLogsToDb(
+      user.uid,
+      todayStr,
+      totalDailySteps,
+      profile.dailyGoal,
+      caloriesData,
+      hourlyData,
+      todayElevationM
+    ).then((ok) => {
+      if (ok) {
+        setCloudSyncStatus('synced');
+      } else {
+        // A failed write (genuinely offline, timeout, permission hiccup) used to
+        // be silently dropped here with no retry and a false "synced" status -
+        // queue it for the next 'online' event instead, so a transient failure
+        // can't permanently lose a day's data before the local queue itself gets
+        // wiped.
+        queueOfflineDailyLog(user.uid, todayStr, totalDailySteps, profile.dailyGoal, caloriesData, hourlyData, todayElevationM);
+        setCloudSyncStatus('offline');
+      }
+    });
   }, [hourlyData, user, profile.dailyGoal, totalDailySteps, caloriesData, todayStr, todayElevationM]);
 
   useEffect(() => {
