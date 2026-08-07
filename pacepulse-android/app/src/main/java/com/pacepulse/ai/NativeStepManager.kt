@@ -57,13 +57,18 @@ object NativeStepManager {
     const val KEY_MOTION_STATE = "current_motion_state"
     const val KEY_MOTION_STATE_UPDATED_AT = "motion_state_updated_at"
 
-    // Floor for the cadence cap on very-short-elapsed ticks (no human takes more than
-    // this many real steps in a single TYPE_STEP_COUNTER callback interval).
-    private const val MAX_DELTA_PER_TICK = 20f
-    // Generous sustained cadence ceiling (well above sprinting) used to scale the cap
-    // for longer gaps between ticks, e.g. a batch of ticks delivered after the phone
-    // was asleep for several minutes during a real walk.
-    private const val MAX_STEPS_PER_SECOND = 5f
+    // Floor for the cadence cap on very-short-elapsed ticks. Deliberately generous:
+    // real-world testing showed the previous tight cap (20 per tick, 5/sec sustained)
+    // rejected a large fraction of genuine steps (120 walked, only 59 counted) on a
+    // device that batches TYPE_STEP_COUNTER updates at the hardware/HAL level -
+    // several seconds' worth of real steps can legitimately arrive in a single
+    // callback, unrelated to actual walking cadence, and the elapsed-time-based cap
+    // has no way to tell that apart from a genuine sensor glitch burst. This is now a
+    // sanity ceiling against truly absurd single-tick values, not fine-grained cadence
+    // policing - the duplicate-tick short-circuit and monotonic (never-decreasing)
+    // guarantee elsewhere in this file are what actually guard against inflation.
+    private const val MAX_DELTA_PER_TICK = 60f
+    private const val MAX_STEPS_PER_SECOND = 15f
     private val EXCLUDED_MOTION_STATES = setOf(
         DetectedActivity.IN_VEHICLE,
         DetectedActivity.ON_BICYCLE

@@ -509,27 +509,17 @@ export default function App() {
     const savedElevation = localStorage.getItem(`pacepulse_elevation_${currentUid}_${todayStr}`);
     setTodayElevationM(savedElevation !== null ? parseFloat(savedElevation) : 0);
 
-    if (authenticatedUser.uid && authenticatedUser.uid !== 'guest') {
-      try {
-        const remoteLogs = await getDailyLogsFromDb(authenticatedUser.uid);
-        if (remoteLogs && remoteLogs.length > 0) {
-          const historyKey = getUserKey('pacepulse_history', authenticatedUser);
-          setWeeklyHistory(remoteLogs);
-          localStorage.setItem(historyKey, JSON.stringify(remoteLogs));
-
-          const todayLog = remoteLogs.find(l => l.date === todayStr);
-          if (todayLog && todayLog.hourlyData && Array.isArray(todayLog.hourlyData) && todayLog.hourlyData.length === 24) {
-            setHourlyData(todayLog.hourlyData);
-            localStorage.setItem(hourlyKey, JSON.stringify(todayLog.hourlyData));
-          }
-          if (todayLog && typeof todayLog.elevationGainM === 'number') {
-            setTodayElevationM(todayLog.elevationGainM);
-          }
-        }
-      } finally {
-        hourlyDataReadyRef.current = true;
-      }
-    } else {
+    // The actual Cloud Firestore restore (weekly history + today's hourlyData)
+    // is NOT duplicated here - it deliberately only happens in the single
+    // [user, todayStr] effect below, which is guaranteed to re-fire right after
+    // setUser() above commits (since `authenticatedUser` is always a fresh
+    // object reference). Having two independent async fetches both racing to
+    // set hourlyData and independently flip hourlyDataReadyRef was a real bug:
+    // it was possible for this restore to land correctly, then get raced by
+    // the other one resolving differently, causing a correct total to
+    // regress. Guest sessions never trigger that effect, so mark them ready
+    // immediately here instead.
+    if (!authenticatedUser.uid || authenticatedUser.uid === 'guest') {
       hourlyDataReadyRef.current = true;
     }
   };
