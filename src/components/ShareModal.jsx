@@ -157,23 +157,8 @@ export function ShareModal({ steps: liveSteps = 0, goal: liveGoal = 10000, strea
       ctx.font = 'bold 18px "Outfit", system-ui, sans-serif';
       ctx.fillText(isGoalHit ? '🎯 GOAL ACHIEVED!' : '⚡ IN PROGRESS', 105, 406);
 
-      // Elevation Gain Pill (only shown when the device supports it and there's
-      // real gain to show)
-      if (showElevation) {
-        ctx.fillStyle = 'rgba(16, 185, 129, 0.18)';
-        ctx.strokeStyle = 'rgba(16, 185, 129, 0.55)';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.roundRect(320, 375, 260, 48, 24);
-        ctx.fill();
-        ctx.stroke();
-
-        ctx.fillStyle = '#34D399';
-        ctx.font = 'bold 18px "Outfit", system-ui, sans-serif';
-        ctx.fillText(`⛰️ ${Math.round(elevationM)}m • ${metersToFloors(elevationM)} floors`, 340, 406);
-      }
-
-      // Metrics Grid - fixed set: Distance, Moving Time & Target Goal
+      // Metrics Grid - fixed set: Distance, Moving Time, Target Goal & Elevation
+      // Gain, all shown the same way (as a card), not as a separate small badge.
       const gridY = 460;
       const boxW = 400;
       const boxH = 120;
@@ -185,8 +170,9 @@ export function ShareModal({ steps: liveSteps = 0, goal: liveGoal = 10000, strea
       const gridMetrics = [
         { bg: 'rgba(0, 242, 254, 0.15)', border: 'rgba(0, 242, 254, 0.4)', labelColor: '#38BDF8', label: '📍 DISTANCE COVERED', value: `${distKm} km` },
         { bg: 'rgba(139, 92, 246, 0.15)', border: 'rgba(139, 92, 246, 0.4)', labelColor: '#A78BFA', label: '⏱️ MOVING TIME', value: `${durationMins} mins` },
-        { bg: 'rgba(16, 185, 129, 0.15)', border: 'rgba(16, 185, 129, 0.4)', labelColor: '#34D399', label: '🎯 TARGET GOAL', value: `${goal.toLocaleString()} steps` }
-      ];
+        { bg: 'rgba(16, 185, 129, 0.15)', border: 'rgba(16, 185, 129, 0.4)', labelColor: '#34D399', label: '🎯 TARGET GOAL', value: `${goal.toLocaleString()} steps` },
+        showElevation ? { bg: 'rgba(52, 211, 153, 0.15)', border: 'rgba(52, 211, 153, 0.4)', labelColor: '#34D399', label: '⛰️ ELEVATION GAIN', value: `${Math.round(elevationM)}m • ${metersToFloors(elevationM)} fl` } : null
+      ].filter(Boolean);
 
       gridMetrics.forEach((metric, idx) => {
         const col = idx % 2;
@@ -300,14 +286,16 @@ export function ShareModal({ steps: liveSteps = 0, goal: liveGoal = 10000, strea
       ctx.font = '800 58px "Outfit", system-ui, sans-serif';
       ctx.fillText(steps.toLocaleString(), hudX + 24, hudY + 140);
 
-      // Metrics Row - fixed set: Distance & Moving Time
+      // Metrics Row - fixed set: Distance, Moving Time & Elevation Gain, all as
+      // the same style of card
       const distKm = caloriesData ? caloriesData.distanceKm : 0;
       const durationMins = caloriesData ? caloriesData.durationMins : 0;
 
       const hudMetrics = [
         { bg: 'rgba(0, 242, 254, 0.15)', border: 'rgba(0, 242, 254, 0.3)', labelColor: '#38BDF8', label: '📍 DISTANCE', value: `${distKm} km` },
-        { bg: 'rgba(139, 92, 246, 0.15)', border: 'rgba(139, 92, 246, 0.3)', labelColor: '#A78BFA', label: '⏱️ TIME', value: `${durationMins} mins` }
-      ];
+        { bg: 'rgba(139, 92, 246, 0.15)', border: 'rgba(139, 92, 246, 0.3)', labelColor: '#A78BFA', label: '⏱️ TIME', value: `${durationMins} mins` },
+        showElevation ? { bg: 'rgba(52, 211, 153, 0.15)', border: 'rgba(52, 211, 153, 0.3)', labelColor: '#34D399', label: '⛰️ ELEVATION', value: `${Math.round(elevationM)}m` } : null
+      ].filter(Boolean);
 
       if (hudMetrics.length > 0) {
         const rowW = hudW - 48;
@@ -334,10 +322,7 @@ export function ShareModal({ steps: liveSteps = 0, goal: liveGoal = 10000, strea
       // Bottom Date & Goal Target Footer
       ctx.fillStyle = '#94A3B8';
       ctx.font = '500 13px "Plus Jakarta Sans", system-ui, sans-serif';
-      const footerText = showElevation
-        ? `Target: ${goal.toLocaleString()} steps • ⛰️ ${metersToFloors(elevationM)} floors • ${new Date().toLocaleDateString()}`
-        : `Target: ${goal.toLocaleString()} steps • ${new Date().toLocaleDateString()}`;
-      ctx.fillText(footerText, hudX + 24, hudY + 280);
+      ctx.fillText(`Target: ${goal.toLocaleString()} steps • ${new Date().toLocaleDateString()}`, hudX + 24, hudY + 280);
   };
 
   /**
