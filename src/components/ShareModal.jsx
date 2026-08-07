@@ -241,7 +241,17 @@ export function ShareModal({ steps: liveSteps = 0, goal: liveGoal = 10000, strea
       wrapText(`"${quote}"`, 110, quoteY + 50, width - 220, 30);
     };
 
-    const drawPhotoOverlayHUD = (ctx, width, height) => {
+    if (document.fonts) {
+      document.fonts.ready.then(() => renderCanvas());
+    } else {
+      renderCanvas();
+    }
+  }, [steps, goal, streakDays, caloriesData, quote, cardMode, customPhotoDataUrl, overlayPosition, elevationM, showElevation]);
+
+  // Draws the stats HUD box (used for both the in-app square preview and the
+  // full-bleed portrait story canvas below) - lifted out of the render effect
+  // above so both places can call it with different canvas dimensions.
+  const drawPhotoOverlayHUD = (ctx, width, height) => {
       // Calculate coordinates for chosen overlay position
       const hudW = 460;
       const hudH = 340;
@@ -328,14 +338,7 @@ export function ShareModal({ steps: liveSteps = 0, goal: liveGoal = 10000, strea
         ? `Target: ${goal.toLocaleString()} steps • ⛰️ ${metersToFloors(elevationM)} floors • ${new Date().toLocaleDateString()}`
         : `Target: ${goal.toLocaleString()} steps • ${new Date().toLocaleDateString()}`;
       ctx.fillText(footerText, hudX + 24, hudY + 280);
-    };
-
-    if (document.fonts) {
-      document.fonts.ready.then(() => renderCanvas());
-    } else {
-      renderCanvas();
-    }
-  }, [steps, goal, streakDays, caloriesData, quote, cardMode, customPhotoDataUrl, overlayPosition, elevationM, showElevation]);
+  };
 
   /**
    * WhatsApp Status and Instagram Stories expect a 9:16 portrait frame - dropping in
@@ -380,6 +383,59 @@ export function ShareModal({ steps: liveSteps = 0, goal: liveGoal = 10000, strea
     sctx.drawImage(sourceCanvas, 0, offsetY, cardSize, cardSize);
 
     return storyCanvas;
+  };
+
+  /**
+   * Photo mode's in-app preview deliberately center-crops the user's photo into a
+   * 1000x1000 square, since that's the shape of the "PacePulse Card" preview. Feeding
+   * that square into buildStoryCanvas() above would letterbox it a second time inside
+   * the portrait frame - the opposite of "full screen". This instead re-crops the
+   * ORIGINAL photo straight to the full 1080x1920 portrait frame edge-to-edge, the way
+   * a real Instagram/WhatsApp Story photo looks, then draws the same stats HUD on top.
+   */
+  const buildPhotoStoryCanvas = () => {
+    return new Promise((resolve, reject) => {
+      const storyCanvas = document.createElement('canvas');
+      const storyW = 1080;
+      const storyH = 1920;
+      storyCanvas.width = storyW;
+      storyCanvas.height = storyH;
+      const sctx = storyCanvas.getContext('2d');
+
+      const img = new Image();
+      img.onload = () => {
+        const imgAspect = img.width / img.height;
+        const frameAspect = storyW / storyH;
+        let drawWidth = storyW;
+        let drawHeight = storyH;
+        let offsetX = 0;
+        let offsetY = 0;
+
+        if (imgAspect > frameAspect) {
+          drawHeight = storyH;
+          drawWidth = storyH * imgAspect;
+          offsetX = -(drawWidth - storyW) / 2;
+        } else {
+          drawWidth = storyW;
+          drawHeight = storyW / imgAspect;
+          offsetY = -(drawHeight - storyH) / 2;
+        }
+
+        sctx.drawImage(img, offsetX, offsetY, drawWidth, drawHeight);
+
+        const overlay = sctx.createLinearGradient(0, 0, 0, storyH);
+        overlay.addColorStop(0, 'rgba(4, 9, 20, 0.35)');
+        overlay.addColorStop(0.5, 'rgba(4, 9, 20, 0.15)');
+        overlay.addColorStop(1, 'rgba(4, 9, 20, 0.75)');
+        sctx.fillStyle = overlay;
+        sctx.fillRect(0, 0, storyW, storyH);
+
+        drawPhotoOverlayHUD(sctx, storyW, storyH);
+        resolve(storyCanvas);
+      };
+      img.onerror = reject;
+      img.src = customPhotoDataUrl;
+    });
   };
 
   // Universal Native Mobile App Sharing (Android WhatsApp Status / Instagram Story)
@@ -429,9 +485,13 @@ export function ShareModal({ steps: liveSteps = 0, goal: liveGoal = 10000, strea
           await navigator.clipboard.writeText(caption);
         } catch (err) {}
 
-        // Stories are 9:16 - compose the square card onto a proper story-shaped
-        // canvas so it fills the screen instead of appearing letterboxed.
-        const storyCanvas = buildStoryCanvas(canvas);
+        // Stories are 9:16 - compose onto a proper story-shaped canvas so it fills
+        // the screen instead of appearing letterboxed. Photo mode re-crops the
+        // original photo straight to the full portrait frame (buildStoryCanvas
+        // would instead letterbox the already-square preview crop a second time).
+        const storyCanvas = (cardMode === 'photo' && customPhotoDataUrl)
+          ? await buildPhotoStoryCanvas().catch(() => buildStoryCanvas(canvas))
+          : buildStoryCanvas(canvas);
         const storyBlob = await new Promise(resolve => storyCanvas.toBlob(resolve, 'image/jpeg', 0.85));
 
         const base64Jpeg = await new Promise((resolve, reject) => {
