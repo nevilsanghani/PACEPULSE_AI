@@ -157,16 +157,16 @@ export function ShareModal({ steps: liveSteps = 0, goal: liveGoal = 10000, strea
         ctx.fillText(`🔥 ${streakDays} DAY STREAK`, width - 265, 107);
       }
 
-      // Main Step Count (steps stays the headline metric even when toggled off
-      // elsewhere - a step-tracking app's card without a step count reads as broken,
-      // so this one line always renders; everything else below is fully optional)
-      ctx.fillStyle = '#94A3B8';
-      ctx.font = 'bold 18px "Plus Jakarta Sans", system-ui, sans-serif';
-      ctx.fillText('STEPS CONQUERED TODAY', 80, 235);
+      // Main Step Count
+      if (selectedStats.steps) {
+        ctx.fillStyle = '#94A3B8';
+        ctx.font = 'bold 18px "Plus Jakarta Sans", system-ui, sans-serif';
+        ctx.fillText('STEPS CONQUERED TODAY', 80, 235);
 
-      ctx.fillStyle = '#FFFFFF';
-      ctx.font = '800 110px "Outfit", system-ui, sans-serif';
-      ctx.fillText(steps.toLocaleString(), 80, 340);
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = '800 110px "Outfit", system-ui, sans-serif';
+        ctx.fillText(steps.toLocaleString(), 80, 340);
+      }
 
       // Goal Pill Badge
       const isGoalHit = steps >= goal && steps > 0;
@@ -311,13 +311,15 @@ export function ShareModal({ steps: liveSteps = 0, goal: liveGoal = 10000, strea
       ctx.fillText(isGoalHit ? '🎯 GOAL ACHIEVED!' : '⚡ IN PROGRESS', hudX + hudW - 160, hudY + 42);
 
       // Big Steps Text
-      ctx.fillStyle = '#94A3B8';
-      ctx.font = 'bold 12px "Plus Jakarta Sans", system-ui, sans-serif';
-      ctx.fillText('STEPS WALKED TODAY', hudX + 24, hudY + 80);
+      if (selectedStats.steps) {
+        ctx.fillStyle = '#94A3B8';
+        ctx.font = 'bold 12px "Plus Jakarta Sans", system-ui, sans-serif';
+        ctx.fillText('STEPS WALKED TODAY', hudX + 24, hudY + 80);
 
-      ctx.fillStyle = '#FFFFFF';
-      ctx.font = '800 58px "Outfit", system-ui, sans-serif';
-      ctx.fillText(steps.toLocaleString(), hudX + 24, hudY + 140);
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = '800 58px "Outfit", system-ui, sans-serif';
+        ctx.fillText(steps.toLocaleString(), hudX + 24, hudY + 140);
+      }
 
       // Metrics Row - only the stats the user selected, spaced evenly across the
       // available width rather than fixed slots.
@@ -375,6 +377,51 @@ export function ShareModal({ steps: liveSteps = 0, goal: liveGoal = 10000, strea
     }
   }, [steps, goal, streakDays, caloriesData, quote, cardMode, customPhotoDataUrl, overlayPosition, elevationM, showElevation, selectedStats]);
 
+  /**
+   * WhatsApp Status and Instagram Stories expect a 9:16 portrait frame - dropping in
+   * the square 1000x1000 card directly leaves it letterboxed instead of filling the
+   * screen. This composites the square card, centered, onto a proper 1080x1920 canvas
+   * with the same background treatment extended to fill the frame, so it reads as one
+   * continuous design rather than a sticker pasted on top of blank bars.
+   */
+  const buildStoryCanvas = (sourceCanvas) => {
+    const storyCanvas = document.createElement('canvas');
+    const storyW = 1080;
+    const storyH = 1920;
+    storyCanvas.width = storyW;
+    storyCanvas.height = storyH;
+    const sctx = storyCanvas.getContext('2d');
+
+    const bgGradient = sctx.createLinearGradient(0, 0, storyW, storyH);
+    bgGradient.addColorStop(0, '#070A12');
+    bgGradient.addColorStop(0.5, '#0F172A');
+    bgGradient.addColorStop(1, '#05070E');
+    sctx.fillStyle = bgGradient;
+    sctx.fillRect(0, 0, storyW, storyH);
+
+    const glowTop = sctx.createRadialGradient(180, 260, 10, 180, 260, 520);
+    glowTop.addColorStop(0, 'rgba(0, 242, 254, 0.18)');
+    glowTop.addColorStop(1, 'transparent');
+    sctx.fillStyle = glowTop;
+    sctx.beginPath();
+    sctx.arc(180, 260, 520, 0, Math.PI * 2);
+    sctx.fill();
+
+    const glowBottom = sctx.createRadialGradient(storyW - 180, storyH - 260, 10, storyW - 180, storyH - 260, 520);
+    glowBottom.addColorStop(0, 'rgba(139, 92, 246, 0.18)');
+    glowBottom.addColorStop(1, 'transparent');
+    sctx.fillStyle = glowBottom;
+    sctx.beginPath();
+    sctx.arc(storyW - 180, storyH - 260, 520, 0, Math.PI * 2);
+    sctx.fill();
+
+    const cardSize = storyW;
+    const offsetY = (storyH - cardSize) / 2;
+    sctx.drawImage(sourceCanvas, 0, offsetY, cardSize, cardSize);
+
+    return storyCanvas;
+  };
+
   // Universal Native Mobile App Sharing (Android WhatsApp Status / Instagram Story)
   const handleUniversalNativeShare = async (platform) => {
     const canvas = canvasRef.current;
@@ -395,7 +442,7 @@ export function ShareModal({ steps: liveSteps = 0, goal: liveGoal = 10000, strea
       const statusStr = isGoalHit ? '🎯 GOAL ACHIEVED!' : '⚡ IN PROGRESS';
 
       const statLines = [
-        selectedStats.steps !== false ? `• Steps: ${steps.toLocaleString()}` : null,
+        selectedStats.steps ? `• Steps: ${steps.toLocaleString()}` : null,
         selectedStats.calories ? `• Active Calories: ${activeKcal} kcal` : null,
         selectedStats.distance ? `• Distance: ${distKm} km` : null,
         selectedStats.movingTime ? `• Moving Time: ${durationMins} mins` : null,
@@ -424,11 +471,16 @@ export function ShareModal({ steps: liveSteps = 0, goal: liveGoal = 10000, strea
           await navigator.clipboard.writeText(caption);
         } catch (err) {}
 
+        // Stories are 9:16 - compose the square card onto a proper story-shaped
+        // canvas so it fills the screen instead of appearing letterboxed.
+        const storyCanvas = buildStoryCanvas(canvas);
+        const storyBlob = await new Promise(resolve => storyCanvas.toBlob(resolve, 'image/jpeg', 0.85));
+
         const base64Jpeg = await new Promise((resolve, reject) => {
           const reader = new FileReader();
           reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
           reader.onerror = reject;
-          reader.readAsDataURL(blob);
+          reader.readAsDataURL(storyBlob || blob);
         });
 
         if (platform === 'whatsapp' && bridge.shareToWhatsAppStatus) {

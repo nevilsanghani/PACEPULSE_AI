@@ -177,12 +177,20 @@ export function generateInitialHourlyData() {
  * AI Quote Generator
  */
 export function getCelebrationQuote(steps, goal, streakDays) {
-  const goalQuotes = [
-    `Unstoppable! Reached my daily goal of ${steps.toLocaleString()} steps! 🚀💪`,
-    `Crushed ${steps.toLocaleString()} steps today! Step by step, defining my fitness journey 🔥`,
+  const goalReachedQuotes = [
+    `Unstoppable! Reached my daily goal of ${goal.toLocaleString()} steps! 🚀💪`,
+    `Crushed my goal with ${steps.toLocaleString()} steps today! Step by step, defining my fitness journey 🔥`,
     `Milestone unlocked! Hit my ${goal.toLocaleString()} steps daily target! 🏆✨`,
-    `Felt the pulse, hit ${steps.toLocaleString()} steps! Energy levels 100% ⚡`,
-    `Consistency in action: ${steps.toLocaleString()} steps conquered today! 🌟`
+    `Felt the pulse, smashed my goal with ${steps.toLocaleString()} steps! Energy levels 100% ⚡`,
+    `Consistency in action: ${steps.toLocaleString()} steps conquered, goal achieved today! 🌟`
+  ];
+
+  const inProgressQuotes = [
+    `${steps.toLocaleString()} steps and counting - chasing my ${goal.toLocaleString()} step goal! ⚡`,
+    `Every step counts! ${steps.toLocaleString()} steps down today, still moving 🔥`,
+    `Building momentum: ${steps.toLocaleString()} steps so far today 💪`,
+    `On the move - ${steps.toLocaleString()} steps today and climbing! 🌟`,
+    `Progress in motion: ${steps.toLocaleString()} steps logged today 🚶‍♂️`
   ];
 
   const streakQuotes = [
@@ -195,8 +203,10 @@ export function getCelebrationQuote(steps, goal, streakDays) {
   if (streakDays >= 7) {
     const idx = Math.floor(Math.random() * streakQuotes.length);
     return streakQuotes[idx];
-  } else {
-    const idx = Math.floor(Math.random() * goalQuotes.length);
-    return goalQuotes[idx];
   }
+
+  const isGoalReached = goal > 0 && steps >= goal;
+  const pool = isGoalReached ? goalReachedQuotes : inProgressQuotes;
+  const idx = Math.floor(Math.random() * pool.length);
+  return pool[idx];
 }
