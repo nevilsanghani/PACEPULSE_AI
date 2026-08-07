@@ -92,6 +92,20 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             }
         }
 
+        /** Diagnostic-only: raw native step-pipeline state, callable synchronously from JS. */
+        @JavascriptInterface
+        fun getDebugSnapshot(): String {
+            val activityRecognitionGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.ACTIVITY_RECOGNITION) == PackageManager.PERMISSION_GRANTED
+            } else true
+
+            val nativeState = NativeStepManager.getDebugSnapshot(this@MainActivity)
+            return nativeState.dropLast(1) +
+                ",\"stepCounterSensorPresent\":${stepCounterSensor != null}" +
+                ",\"activityRecognitionGranted\":$activityRecognitionGranted" +
+                "}"
+        }
+
         @JavascriptInterface
         fun updateWidgetData(steps: Int, goal: Int, activeKcal: Int, distanceKm: Double) {
             runOnUiThread {

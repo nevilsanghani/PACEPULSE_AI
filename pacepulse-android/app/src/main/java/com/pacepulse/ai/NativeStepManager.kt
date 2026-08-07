@@ -301,6 +301,36 @@ object NativeStepManager {
         Log.d("PacePulseNative", "Synced $todaySteps saved steps for user $activeUid to WebView")
     }
 
+    /**
+     * Diagnostic-only snapshot of the raw internal state behind the final step count -
+     * baseline, last hardware reading, motion-state exclusion, active uid/date keys -
+     * so a stuck-at-0 report can be root-caused on-device without adb/logcat access.
+     */
+    @Synchronized
+    fun getDebugSnapshot(context: Context): String {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val todayStr = getTodayStr()
+        val keyBaseline = "baseline_$activeUid"
+        val keyDate = "date_$activeUid"
+        val keySteps = "steps_${activeUid}_$todayStr"
+
+        val midnightBaseline = prefs.getFloat(keyBaseline, -1f)
+        val savedDate = prefs.getString(keyDate, "") ?: ""
+        val savedSteps = prefs.getInt(keySteps, 0)
+        val motionState = prefs.getInt(KEY_MOTION_STATE, DetectedActivity.UNKNOWN)
+
+        return "{" +
+            "\"activeUid\":\"$activeUid\"," +
+            "\"todayStr\":\"$todayStr\"," +
+            "\"savedDate\":\"$savedDate\"," +
+            "\"midnightBaseline\":$midnightBaseline," +
+            "\"lastKnownHardwareTotal\":$lastKnownHardwareTotal," +
+            "\"savedSteps\":$savedSteps," +
+            "\"motionState\":$motionState," +
+            "\"excludedByMotion\":${motionState in EXCLUDED_MOTION_STATES}" +
+            "}"
+    }
+
     @Synchronized
     fun resetBaseline(context: Context) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)

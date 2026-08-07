@@ -40,6 +40,16 @@ export function DebugPanel({ hourlyDataReadyRef, nativeCallInfoRef, totalDailySt
   const nativeInfo = nativeCallInfoRef.current;
   const authUser = auth.currentUser;
 
+  let nativeSnapshot = null;
+  let nativeSnapshotError = null;
+  if (bridgePresent && window.AndroidStepBridge.getDebugSnapshot) {
+    try {
+      nativeSnapshot = JSON.parse(window.AndroidStepBridge.getDebugSnapshot());
+    } catch (e) {
+      nativeSnapshotError = e && e.message ? e.message : String(e);
+    }
+  }
+
   const row = (label, value, warn) => (
     <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', padding: '4px 0', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
       <span style={{ color: '#94A3B8' }}>{label}</span>
@@ -67,6 +77,24 @@ export function DebugPanel({ hourlyDataReadyRef, nativeCallInfoRef, totalDailySt
       {row('Last native call at', nativeInfo.lastTime ?? '—')}
       {row('hourlyDataReadyRef', hourlyDataReadyRef.current, !hourlyDataReadyRef.current)}
       {row('React totalDailySteps', totalDailySteps)}
+
+      <div style={{ margin: '12px 0 8px', color: '#38BDF8', fontWeight: 700 }}>Native Raw State</div>
+      {!nativeSnapshot && !nativeSnapshotError && row('getDebugSnapshot()', bridgePresent ? 'not available in this build' : 'bridge not present', true)}
+      {nativeSnapshotError && row('getDebugSnapshot() error', nativeSnapshotError, true)}
+      {nativeSnapshot && (
+        <>
+          {row('stepCounterSensorPresent', nativeSnapshot.stepCounterSensorPresent, !nativeSnapshot.stepCounterSensorPresent)}
+          {row('activityRecognitionGranted', nativeSnapshot.activityRecognitionGranted, !nativeSnapshot.activityRecognitionGranted)}
+          {row('native activeUid', nativeSnapshot.activeUid)}
+          {row('native todayStr', nativeSnapshot.todayStr)}
+          {row('native savedDate', nativeSnapshot.savedDate, nativeSnapshot.savedDate !== nativeSnapshot.todayStr)}
+          {row('midnightBaseline', nativeSnapshot.midnightBaseline)}
+          {row('lastKnownHardwareTotal', nativeSnapshot.lastKnownHardwareTotal, nativeSnapshot.lastKnownHardwareTotal < 0)}
+          {row('savedSteps (native)', nativeSnapshot.savedSteps)}
+          {row('motionState', nativeSnapshot.motionState)}
+          {row('excludedByMotion', nativeSnapshot.excludedByMotion, nativeSnapshot.excludedByMotion)}
+        </>
+      )}
 
       <div style={{ margin: '12px 0 8px', color: '#38BDF8', fontWeight: 700 }}>Auth / Sync</div>
       {row('App user.uid (React)', userUid || '(none)')}
