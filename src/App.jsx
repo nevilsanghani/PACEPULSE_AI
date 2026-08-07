@@ -399,23 +399,34 @@ export default function App() {
       const previousNativeTotal = lastNativeTotalRef.current;
       lastNativeTotalRef.current = totalSteps;
 
-      // First reading this session, or native's own count is lower than what we
-      // last saw (its local baseline was reset - e.g. a full uninstall wipes the
-      // SharedPreferences it lives in) - just establish the new reference point
-      // without touching hourlyData, so a correctly cloud-restored total isn't
-      // discarded the moment a fresh-baseline native reading arrives. The next
-      // call will add real new steps on top of it via the delta below.
-      if (previousNativeTotal === null || totalSteps < previousNativeTotal) return;
-
-      const delta = totalSteps - previousNativeTotal;
-      if (delta <= 0) return;
-
       setHourlyData(prev => {
-        const next = [...prev];
+        const currentTotal = prev.reduce((sum, h) => sum + (h.steps || 0), 0);
         const hour = new Date().getHours();
+        let deltaToAdd;
+
+        if (previousNativeTotal === null) {
+          // First native reading this session. Never subtract - only add
+          // whatever portion of native's count isn't reflected in the
+          // currently-displayed total yet. This covers real steps taken
+          // during the brief window before the ready-gate opened (native
+          // already nonzero on its very first reading) WITHOUT discarding a
+          // correctly cloud-restored total when native's fresh reading is
+          // lower (e.g. right after a reinstall wiped its local baseline).
+          deltaToAdd = Math.max(totalSteps - currentTotal, 0);
+        } else if (totalSteps < previousNativeTotal) {
+          // Native's own count dropped below what we last saw - its local
+          // baseline was reset. Re-anchor without touching the display.
+          deltaToAdd = 0;
+        } else {
+          deltaToAdd = totalSteps - previousNativeTotal;
+        }
+
+        if (deltaToAdd <= 0) return prev;
+
+        const next = [...prev];
         next[hour] = {
           ...next[hour],
-          steps: (next[hour].steps || 0) + delta
+          steps: (next[hour].steps || 0) + deltaToAdd
         };
         return next;
       });
