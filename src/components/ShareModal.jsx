@@ -25,18 +25,6 @@ export function ShareModal({ steps: liveSteps = 0, goal: liveGoal = 10000, strea
   const [quote, setQuote] = useState(() => getCelebrationQuote(steps, goal, streakDays));
   const [sharingPlatform, setSharingPlatform] = useState(null); // null | 'whatsapp' | 'instagram' | 'download'
 
-  // Which stats appear on the card - user-customizable. Elevation only defaults on
-  // when the device actually supports it and there's real gain to show.
-  const [selectedStats, setSelectedStats] = useState({
-    steps: true,
-    calories: true,
-    distance: true,
-    movingTime: true,
-    elevation: showElevation,
-    streak: true
-  });
-  const toggleStat = (key) => setSelectedStats(prev => ({ ...prev, [key]: !prev[key] }));
-
   // Handle Photo File Upload / Camera Capture via FileReader for 100% reliability
   const handlePhotoUpload = (e) => {
     const file = e.target.files?.[0];
@@ -142,31 +130,14 @@ export function ShareModal({ steps: liveSteps = 0, goal: liveGoal = 10000, strea
       ctx.font = '500 18px "Plus Jakarta Sans", system-ui, sans-serif';
       ctx.fillText('Precision Step & Calorie Story', 80, 145);
 
-      // Streak Badge
-      if (selectedStats.streak && streakDays >= 1) {
-        ctx.fillStyle = 'rgba(255, 107, 0, 0.22)';
-        ctx.strokeStyle = 'rgba(255, 107, 0, 0.7)';
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.roundRect(width - 290, 75, 210, 50, 25);
-        ctx.fill();
-        ctx.stroke();
-
-        ctx.fillStyle = '#FF9E44';
-        ctx.font = 'bold 18px "Outfit", system-ui, sans-serif';
-        ctx.fillText(`🔥 ${streakDays} DAY STREAK`, width - 265, 107);
-      }
-
       // Main Step Count
-      if (selectedStats.steps) {
-        ctx.fillStyle = '#94A3B8';
-        ctx.font = 'bold 18px "Plus Jakarta Sans", system-ui, sans-serif';
-        ctx.fillText('STEPS CONQUERED TODAY', 80, 235);
+      ctx.fillStyle = '#94A3B8';
+      ctx.font = 'bold 18px "Plus Jakarta Sans", system-ui, sans-serif';
+      ctx.fillText('STEPS CONQUERED TODAY', 80, 235);
 
-        ctx.fillStyle = '#FFFFFF';
-        ctx.font = '800 110px "Outfit", system-ui, sans-serif';
-        ctx.fillText(steps.toLocaleString(), 80, 340);
-      }
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = '800 110px "Outfit", system-ui, sans-serif';
+      ctx.fillText(steps.toLocaleString(), 80, 340);
 
       // Goal Pill Badge
       const isGoalHit = steps >= goal && steps > 0;
@@ -182,9 +153,9 @@ export function ShareModal({ steps: liveSteps = 0, goal: liveGoal = 10000, strea
       ctx.font = 'bold 18px "Outfit", system-ui, sans-serif';
       ctx.fillText(isGoalHit ? '🎯 GOAL ACHIEVED!' : '⚡ IN PROGRESS', 105, 406);
 
-      // Elevation Gain Pill (only shown when the device supports it, there's real
-      // gain to show, and the user hasn't turned it off)
-      if (selectedStats.elevation && showElevation) {
+      // Elevation Gain Pill (only shown when the device supports it and there's
+      // real gain to show)
+      if (showElevation) {
         ctx.fillStyle = 'rgba(16, 185, 129, 0.18)';
         ctx.strokeStyle = 'rgba(16, 185, 129, 0.55)';
         ctx.lineWidth = 2;
@@ -198,24 +169,20 @@ export function ShareModal({ steps: liveSteps = 0, goal: liveGoal = 10000, strea
         ctx.fillText(`⛰️ ${Math.round(elevationM)}m • ${metersToFloors(elevationM)} floors`, 340, 406);
       }
 
-      // Metrics Grid - only the stats the user selected, laid out 2-per-row in the
-      // order chosen rather than fixed slots, so picking 1 or 3 doesn't leave a
-      // visibly broken gap where a hidden card used to be.
+      // Metrics Grid - fixed set: Distance, Moving Time & Target Goal
       const gridY = 460;
       const boxW = 400;
       const boxH = 120;
       const gap = 40;
 
-      const activeKcal = caloriesData ? caloriesData.activeKcal || caloriesData.totalKcal : 0;
       const distKm = caloriesData ? caloriesData.distanceKm : 0;
       const durationMins = caloriesData ? caloriesData.durationMins : 0;
 
       const gridMetrics = [
-        { enabled: selectedStats.calories, bg: 'rgba(255, 107, 0, 0.15)', border: 'rgba(255, 107, 0, 0.4)', labelColor: '#FF9E44', label: '🔥 ACTIVE CALORIES', value: `${activeKcal} kcal` },
-        { enabled: selectedStats.distance, bg: 'rgba(0, 242, 254, 0.15)', border: 'rgba(0, 242, 254, 0.4)', labelColor: '#38BDF8', label: '📍 DISTANCE COVERED', value: `${distKm} km` },
-        { enabled: selectedStats.movingTime, bg: 'rgba(139, 92, 246, 0.15)', border: 'rgba(139, 92, 246, 0.4)', labelColor: '#A78BFA', label: '⏱️ MOVING TIME', value: `${durationMins} mins` },
-        { enabled: true, bg: 'rgba(16, 185, 129, 0.15)', border: 'rgba(16, 185, 129, 0.4)', labelColor: '#34D399', label: '🎯 TARGET GOAL', value: `${goal.toLocaleString()} steps` }
-      ].filter(m => m.enabled);
+        { bg: 'rgba(0, 242, 254, 0.15)', border: 'rgba(0, 242, 254, 0.4)', labelColor: '#38BDF8', label: '📍 DISTANCE COVERED', value: `${distKm} km` },
+        { bg: 'rgba(139, 92, 246, 0.15)', border: 'rgba(139, 92, 246, 0.4)', labelColor: '#A78BFA', label: '⏱️ MOVING TIME', value: `${durationMins} mins` },
+        { bg: 'rgba(16, 185, 129, 0.15)', border: 'rgba(16, 185, 129, 0.4)', labelColor: '#34D399', label: '🎯 TARGET GOAL', value: `${goal.toLocaleString()} steps` }
+      ];
 
       gridMetrics.forEach((metric, idx) => {
         const col = idx % 2;
@@ -311,27 +278,22 @@ export function ShareModal({ steps: liveSteps = 0, goal: liveGoal = 10000, strea
       ctx.fillText(isGoalHit ? '🎯 GOAL ACHIEVED!' : '⚡ IN PROGRESS', hudX + hudW - 160, hudY + 42);
 
       // Big Steps Text
-      if (selectedStats.steps) {
-        ctx.fillStyle = '#94A3B8';
-        ctx.font = 'bold 12px "Plus Jakarta Sans", system-ui, sans-serif';
-        ctx.fillText('STEPS WALKED TODAY', hudX + 24, hudY + 80);
+      ctx.fillStyle = '#94A3B8';
+      ctx.font = 'bold 12px "Plus Jakarta Sans", system-ui, sans-serif';
+      ctx.fillText('STEPS WALKED TODAY', hudX + 24, hudY + 80);
 
-        ctx.fillStyle = '#FFFFFF';
-        ctx.font = '800 58px "Outfit", system-ui, sans-serif';
-        ctx.fillText(steps.toLocaleString(), hudX + 24, hudY + 140);
-      }
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = '800 58px "Outfit", system-ui, sans-serif';
+      ctx.fillText(steps.toLocaleString(), hudX + 24, hudY + 140);
 
-      // Metrics Row - only the stats the user selected, spaced evenly across the
-      // available width rather than fixed slots.
-      const activeKcal = caloriesData ? caloriesData.activeKcal || caloriesData.totalKcal : 0;
+      // Metrics Row - fixed set: Distance & Moving Time
       const distKm = caloriesData ? caloriesData.distanceKm : 0;
       const durationMins = caloriesData ? caloriesData.durationMins : 0;
 
       const hudMetrics = [
-        { enabled: selectedStats.distance, bg: 'rgba(0, 242, 254, 0.15)', border: 'rgba(0, 242, 254, 0.3)', labelColor: '#38BDF8', label: '📍 DISTANCE', value: `${distKm} km` },
-        { enabled: selectedStats.calories, bg: 'rgba(255, 107, 0, 0.15)', border: 'rgba(255, 107, 0, 0.3)', labelColor: '#FF9E44', label: '🔥 CALORIES', value: `${activeKcal} kcal` },
-        { enabled: selectedStats.movingTime, bg: 'rgba(139, 92, 246, 0.15)', border: 'rgba(139, 92, 246, 0.3)', labelColor: '#A78BFA', label: '⏱️ TIME', value: `${durationMins} mins` }
-      ].filter(m => m.enabled);
+        { bg: 'rgba(0, 242, 254, 0.15)', border: 'rgba(0, 242, 254, 0.3)', labelColor: '#38BDF8', label: '📍 DISTANCE', value: `${distKm} km` },
+        { bg: 'rgba(139, 92, 246, 0.15)', border: 'rgba(139, 92, 246, 0.3)', labelColor: '#A78BFA', label: '⏱️ TIME', value: `${durationMins} mins` }
+      ];
 
       if (hudMetrics.length > 0) {
         const rowW = hudW - 48;
@@ -358,16 +320,10 @@ export function ShareModal({ steps: liveSteps = 0, goal: liveGoal = 10000, strea
       // Bottom Date & Goal Target Footer
       ctx.fillStyle = '#94A3B8';
       ctx.font = '500 13px "Plus Jakarta Sans", system-ui, sans-serif';
-      const footerText = selectedStats.elevation && showElevation
+      const footerText = showElevation
         ? `Target: ${goal.toLocaleString()} steps • ⛰️ ${metersToFloors(elevationM)} floors • ${new Date().toLocaleDateString()}`
         : `Target: ${goal.toLocaleString()} steps • ${new Date().toLocaleDateString()}`;
       ctx.fillText(footerText, hudX + 24, hudY + 280);
-
-      if (selectedStats.streak && streakDays >= 1) {
-        ctx.fillStyle = '#FF9E44';
-        ctx.font = 'bold 13px "Outfit", system-ui, sans-serif';
-        ctx.fillText(`🔥 ${streakDays} Day Streak`, hudX + 24, hudY + 308);
-      }
     };
 
     if (document.fonts) {
@@ -375,7 +331,7 @@ export function ShareModal({ steps: liveSteps = 0, goal: liveGoal = 10000, strea
     } else {
       renderCanvas();
     }
-  }, [steps, goal, streakDays, caloriesData, quote, cardMode, customPhotoDataUrl, overlayPosition, elevationM, showElevation, selectedStats]);
+  }, [steps, goal, streakDays, caloriesData, quote, cardMode, customPhotoDataUrl, overlayPosition, elevationM, showElevation]);
 
   /**
    * WhatsApp Status and Instagram Stories expect a 9:16 portrait frame - dropping in
@@ -435,19 +391,17 @@ export function ShareModal({ steps: liveSteps = 0, goal: liveGoal = 10000, strea
     setSharingPlatform(platform);
 
     try {
-      const activeKcal = caloriesData ? caloriesData.activeKcal || caloriesData.totalKcal : 0;
       const distKm = caloriesData ? caloriesData.distanceKm : 0;
       const durationMins = caloriesData ? caloriesData.durationMins : 0;
       const isGoalHit = steps >= goal && steps > 0;
       const statusStr = isGoalHit ? '🎯 GOAL ACHIEVED!' : '⚡ IN PROGRESS';
 
       const statLines = [
-        selectedStats.steps ? `• Steps: ${steps.toLocaleString()}` : null,
-        selectedStats.calories ? `• Active Calories: ${activeKcal} kcal` : null,
-        selectedStats.distance ? `• Distance: ${distKm} km` : null,
-        selectedStats.movingTime ? `• Moving Time: ${durationMins} mins` : null,
-        selectedStats.elevation && showElevation ? `• Elevation Gain: ${Math.round(elevationM)} m (${metersToFloors(elevationM)} floors) ⛰️` : null,
-        selectedStats.streak && streakDays >= 1 ? `• Active Streak: ${streakDays} days 🔥` : null
+        `• Steps: ${steps.toLocaleString()}`,
+        `• Target Goal: ${goal.toLocaleString()} steps`,
+        `• Distance: ${distKm} km`,
+        `• Total Movement: ${durationMins} mins`,
+        showElevation ? `• Elevation Gain: ${Math.round(elevationM)} m (${metersToFloors(elevationM)} floors) ⛰️` : null
       ].filter(Boolean).join('\n');
 
       const caption = `🏃 *PacePulse AI Fitness Update* 🏃\n\n"${quote}"\n\n📊 *Daily Stats (${statusStr}):*\n${statLines}\n\nTracked with PacePulse AI! ⚡`;
@@ -571,10 +525,10 @@ export function ShareModal({ steps: liveSteps = 0, goal: liveGoal = 10000, strea
   };
 
   const handleCopyCaption = () => {
-    const activeKcal = caloriesData ? caloriesData.activeKcal : 0;
     const distKm = caloriesData ? caloriesData.distanceKm : 0;
+    const durationMins = caloriesData ? caloriesData.durationMins : 0;
     const elevationPart = showElevation ? ` | Elevation: ${metersToFloors(elevationM)} floors ⛰️` : '';
-    const fullCaption = `${quote}\n\nSteps: ${steps.toLocaleString()} | Active Calories: ${activeKcal} kcal | Distance: ${distKm} km${elevationPart} | ${streakDays} Day Streak 🔥\n#PacePulseAI #FitnessGoal #StepTracker #WalkingStreak`;
+    const fullCaption = `${quote}\n\nSteps: ${steps.toLocaleString()} | Target Goal: ${goal.toLocaleString()} steps | Distance: ${distKm} km | Total Movement: ${durationMins} mins${elevationPart}\n#PacePulseAI #FitnessGoal #StepTracker #WalkingStreak`;
     navigator.clipboard.writeText(fullCaption);
     setCopied(true);
     setTimeout(() => setCopied(false), 2500);
@@ -736,47 +690,6 @@ export function ShareModal({ steps: liveSteps = 0, goal: liveGoal = 10000, strea
             </div>
           </div>
         )}
-
-        {/* Stat Selection - choose what appears on the card */}
-        <div style={{
-          background: 'rgba(139, 92, 246, 0.08)',
-          border: '1px solid rgba(139, 92, 246, 0.25)',
-          borderRadius: '16px',
-          padding: '12px',
-          marginBottom: '16px'
-        }}>
-          <span style={{ fontSize: '12px', fontWeight: '700', color: '#A78BFA', display: 'block', marginBottom: '8px' }}>
-            Choose What to Show on the Card:
-          </span>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-            {[
-              { key: 'steps', label: 'Steps' },
-              { key: 'calories', label: 'Calories' },
-              { key: 'distance', label: 'Distance' },
-              { key: 'movingTime', label: 'Moving Time' },
-              ...(elevationSupported ? [{ key: 'elevation', label: 'Elevation' }] : []),
-              { key: 'streak', label: 'Streak' }
-            ].map(stat => (
-              <button
-                key={stat.key}
-                type="button"
-                onClick={() => toggleStat(stat.key)}
-                style={{
-                  padding: '6px 12px',
-                  fontSize: '11px',
-                  fontWeight: '700',
-                  borderRadius: '20px',
-                  border: selectedStats[stat.key] ? '1.5px solid #A78BFA' : '1px solid rgba(255, 255, 255, 0.15)',
-                  background: selectedStats[stat.key] ? 'rgba(139, 92, 246, 0.3)' : 'rgba(255, 255, 255, 0.05)',
-                  color: selectedStats[stat.key] ? '#E9D5FF' : 'var(--text-muted)',
-                  cursor: 'pointer'
-                }}
-              >
-                {selectedStats[stat.key] ? '✓ ' : ''}{stat.label}
-              </button>
-            ))}
-          </div>
-        </div>
 
         {/* Live Canvas Graphic Preview */}
         <div style={{

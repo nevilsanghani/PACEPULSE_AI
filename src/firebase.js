@@ -9,6 +9,7 @@ import {
   deleteUser,
   createUserWithEmailAndPassword
 } from 'firebase/auth';
+import { DEFAULT_PROFILE } from './utils/fitnessEngine';
 
 // PacePulse AI has no public web frontend - this Worker is called directly by
 // the Android (and future Mac) app's WebView, which is always a different origin,
@@ -332,6 +333,27 @@ export async function saveDailyLogsToDb(uid, dateStr, totalSteps, goal, calories
 }
 
 /**
+ * Persists profile settings (weight, height, goal, gender, etc.) to the user's
+ * Firestore doc. Without this, edits made in the Profile modal only ever lived in
+ * localStorage - a reinstall (which wipes the WebView's local storage) would
+ * silently roll the user back to whatever profile existed at signup time.
+ */
+export async function saveUserProfileToDb(uid, profile) {
+  if (!uid || uid === 'guest') return;
+  try {
+    await firestoreFetch(`${FIRESTORE_REST_BASE}/users/${uid}?updateMask.fieldPaths=profile`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fields: {
+          profile: { mapValue: { fields: objectToFirestoreFields(profile || {}) } }
+        }
+      })
+    }).catch(() => {});
+  } catch (e) {}
+}
+
+/**
  * Fetches a user's Firestore profile doc (users/{uid}) and shapes it into the
  * app's expected user object. Falls back to sane defaults if the doc is missing.
  */
@@ -343,6 +365,12 @@ export async function fetchUserProfileDoc(uid, fallbackEmail) {
       const docData = await res.json();
       const f = docData.fields || {};
       const pFields = f.profile && f.profile.mapValue ? f.profile.mapValue.fields : {};
+      // Firestore's REST API stores whole numbers as integerValue and fractional
+      // numbers as doubleValue - a field can legitimately arrive as either
+      // depending on what was last saved, so both must be checked.
+      const num = (field, fallback) => field && (field.integerValue !== undefined || field.doubleValue !== undefined)
+        ? Number(field.integerValue !== undefined ? field.integerValue : field.doubleValue)
+        : fallback;
       return {
         uid,
         displayName: f.displayName ? f.displayName.stringValue : fallbackEmail.split('@')[0],
@@ -350,15 +378,20 @@ export async function fetchUserProfileDoc(uid, fallbackEmail) {
         username: f.username ? f.username.stringValue : `@${rawTag}`,
         createdAt: f.createdAt ? f.createdAt.stringValue : new Date().toISOString(),
         profile: {
+          ...DEFAULT_PROFILE,
           name: pFields.name ? pFields.name.stringValue : fallbackEmail.split('@')[0],
           email: fallbackEmail,
           username: f.username ? f.username.stringValue : `@${rawTag}`,
           gender: pFields.gender ? pFields.gender.stringValue : 'male',
           birthDate: pFields.birthDate ? pFields.birthDate.stringValue : '2000-01-01',
-          age: pFields.age ? Number(pFields.age.integerValue || 25) : 25,
-          heightCm: pFields.heightCm ? Number(pFields.heightCm.doubleValue || 175) : 175,
-          weightKg: pFields.weightKg ? Number(pFields.weightKg.doubleValue || 70) : 70,
-          dailyGoal: pFields.dailyGoal ? Number(pFields.dailyGoal.integerValue || 10000) : 10000
+          age: num(pFields.age, 25),
+          heightCm: num(pFields.heightCm, 175),
+          weightKg: num(pFields.weightKg, 70),
+          dailyGoal: num(pFields.dailyGoal, 10000),
+          strideCm: num(pFields.strideCm, DEFAULT_PROFILE.strideCm),
+          heightUnit: pFields.heightUnit ? pFields.heightUnit.stringValue : DEFAULT_PROFILE.heightUnit,
+          weightUnit: pFields.weightUnit ? pFields.weightUnit.stringValue : DEFAULT_PROFILE.weightUnit,
+          useAutoStride: pFields.useAutoStride ? pFields.useAutoStride.booleanValue : DEFAULT_PROFILE.useAutoStride
         }
       };
     }

@@ -32,8 +32,6 @@ export function WeeklyStepChart({ todaySteps = 0, dailyGoal = 10000, weeklyHisto
       steps = Math.max(todaySteps, matchedLog ? matchedLog.steps || 0 : 0);
     } else if (matchedLog && typeof matchedLog.steps === 'number') {
       steps = matchedLog.steps;
-    } else if (effectiveHistory[idx] && typeof effectiveHistory[idx].steps === 'number') {
-      steps = effectiveHistory[idx].steps;
     } else {
       steps = 0;
     }

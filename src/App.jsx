@@ -25,7 +25,8 @@ import {
   queueOfflineDailyLog,
   flushOfflineSyncQueue,
   deleteUserAccountFromDb,
-  fetchUserProfileDoc
+  fetchUserProfileDoc,
+  saveUserProfileToDb
 } from './firebase';
 import { 
   DEFAULT_PROFILE, 
@@ -322,6 +323,13 @@ export default function App() {
   useEffect(() => {
     const key = getUserKey('pacepulse_profile');
     localStorage.setItem(key, JSON.stringify(profile));
+
+    // Push to Firestore too - without this, profile edits (weight, height, goal,
+    // etc.) only ever lived in the WebView's local storage, which is wiped on
+    // uninstall, silently rolling the user back to their signup-time defaults.
+    if (user && user.uid !== 'guest') {
+      saveUserProfileToDb(user.uid, profile);
+    }
   }, [profile, user]);
 
   useEffect(() => {
