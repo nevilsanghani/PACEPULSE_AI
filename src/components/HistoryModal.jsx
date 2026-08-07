@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { getDailyLogsFromDb } from '../firebase';
+import { getLocalDateStr } from '../utils/fitnessEngine';
 
 export function HistoryModal({ user, profile, onClose }) {
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = getLocalDateStr();
   const [historyLogs, setHistoryLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedDate, setSelectedDate] = useState(todayStr);
@@ -221,7 +222,7 @@ export function HistoryModal({ user, profile, onClose }) {
             {Array.from({ length: 7 }, (_, i) => {
               const d = new Date();
               d.setDate(d.getDate() - i);
-              const dateStr = d.toISOString().split('T')[0];
+              const dateStr = getLocalDateStr(d);
               const isSelected = dateStr === selectedDate;
               const dayName = i === 0 ? 'Today' : d.toLocaleDateString('en-US', { weekday: 'short' });
 

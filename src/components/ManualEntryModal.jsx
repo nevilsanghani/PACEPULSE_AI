@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
+import { getLocalDateStr } from '../utils/fitnessEngine';
 
 export function ManualEntryModal({ onClose, onSaveEntry }) {
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = getLocalDateStr();
   const [selectedDate, setSelectedDate] = useState(todayStr);
   const [stepsInput, setStepsInput] = useState('');
   const [caloriesInput, setCaloriesInput] = useState('');

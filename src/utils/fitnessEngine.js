@@ -3,6 +3,25 @@
  * Grounded in exercise physiology (MET equations & Mifflin-St Jeor BMR)
  */
 
+/**
+ * Formats a date as a device-local YYYY-MM-DD string. Deliberately NOT
+ * `date.toISOString().split('T')[0]` - that's always UTC, while the native
+ * Android side's date-of-day (NativeStepManager.getTodayStr, via
+ * SimpleDateFormat with no explicit timezone) uses the device's local
+ * timezone. For any user not in UTC+0, that mismatch creates a window
+ * around local midnight - exactly as wide as their UTC offset - where native
+ * has already rolled over to a new day while the JS side still considers it
+ * yesterday (or vice versa), causing yesterday's total to bleed into today's
+ * display, or today's real steps to be silently discarded as "old". Every
+ * "what day is it" computation in this app must use this, not toISOString().
+ */
+export function getLocalDateStr(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 export const DEFAULT_PROFILE = {
   name: "My Profile",
   gender: "male", // 'male' | 'female' | 'other'

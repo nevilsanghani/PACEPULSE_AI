@@ -35,7 +35,8 @@ import {
   calculateDistanceKm,
   calculateAgeFromBirthDate,
   calculateBMR,
-  calculateStrideCm
+  calculateStrideCm,
+  getLocalDateStr
 } from './utils/fitnessEngine';
 import { computeStepDelta } from './utils/stepReconciliation';
 
@@ -78,7 +79,7 @@ export default function App() {
   const [socialTab, setSocialTab] = useState('leaderboard');
   const [isAudioMuted, setIsMuted] = useState(false);
 
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = getLocalDateStr();
   // Starts optimistic rather than trusting navigator.onLine (unreliable in
   // Android WebView) - the sync effect below corrects this almost immediately
   // based on what a real Firestore write actually does, not a heuristic.

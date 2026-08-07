@@ -79,6 +79,11 @@ object NativeStepManager {
     private var lastKnownHardwareTotal: Float = -1f
     private var lastEventTimestampMs: Long = -1L
 
+    // Deliberately the device's LOCAL timezone (SimpleDateFormat's default when
+    // none is set) - the JS side's getLocalDateStr() must match this exactly,
+    // not UTC (e.g. via toISOString()). A mismatch there is what caused native
+    // to roll over to a new day's baseline before/after the JS side did,
+    // bleeding one day's total into the other's display around local midnight.
     private fun getTodayStr(): String {
         return SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
     }

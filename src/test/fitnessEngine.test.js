@@ -1,12 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { 
-  calculateStrideCm, 
-  calculateBMR, 
-  getMETFromCadence, 
-  calculateDistanceKm, 
+import {
+  calculateStrideCm,
+  calculateBMR,
+  getMETFromCadence,
+  calculateDistanceKm,
   calculateCalories,
   generateInitialHourlyData,
-  getCelebrationQuote
+  getCelebrationQuote,
+  getLocalDateStr
 } from '../utils/fitnessEngine';
 
 describe('PacePulse AI - Fitness & Calorie Engine Unit Tests', () => {
@@ -118,6 +119,39 @@ describe('PacePulse AI - Fitness & Calorie Engine Unit Tests', () => {
     it('should return 1-WEEK STREAK quote when streak is 7+ days', () => {
       const quote = getCelebrationQuote(10000, 10000, 7);
       expect(quote).toMatch(/1-?Week|7 Days|Streak/i);
+    });
+  });
+
+  describe('getLocalDateStr (timezone-safe day boundary)', () => {
+    it('formats using local date components, not UTC', () => {
+      // A date constructed from local (year, month, day, hour, ...) fields
+      // always reports that same local date back, regardless of what
+      // timezone the test runner's machine happens to be in - unlike
+      // toISOString(), which would shift to a different calendar day
+      // whenever local time is within |UTC offset| hours of midnight.
+      const localMidnightPlusOne = new Date(2026, 7, 8, 0, 30, 0); // Aug 8, 2026, 00:30 local
+      expect(getLocalDateStr(localMidnightPlusOne)).toBe('2026-08-08');
+    });
+
+    it('does not roll over to the next/previous day the way toISOString() can', () => {
+      // Simulates the exact failure mode this function replaces: a moment
+      // that is unambiguously "today, just after local midnight" must not
+      // format as yesterday (or vice versa for negative UTC offsets).
+      const justAfterLocalMidnight = new Date(2026, 7, 8, 0, 5, 0);
+      const result = getLocalDateStr(justAfterLocalMidnight);
+      expect(result).toBe('2026-08-08');
+      expect(result).not.toBe('2026-08-07');
+    });
+
+    it('pads single-digit months and days', () => {
+      const earlyInYear = new Date(2026, 0, 5, 12, 0, 0); // Jan 5, 2026
+      expect(getLocalDateStr(earlyInYear)).toBe('2026-01-05');
+    });
+
+    it('defaults to the current date when called with no argument', () => {
+      const now = new Date();
+      const expected = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      expect(getLocalDateStr()).toBe(expected);
     });
   });
 

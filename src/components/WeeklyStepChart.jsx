@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Calendar, TrendingUp, CheckCircle, Target, Flame, Navigation, Clock } from 'lucide-react';
+import { getLocalDateStr } from '../utils/fitnessEngine';
 
 export function WeeklyStepChart({ todaySteps = 0, dailyGoal = 10000, weeklyHistory = [], history = [], onOpenHistory }) {
   const daysOfWeek = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -19,7 +20,7 @@ export function WeeklyStepChart({ todaySteps = 0, dailyGoal = 10000, weeklyHisto
   const currentWeekDates = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(mondayDate);
     d.setDate(mondayDate.getDate() + i);
-    return d.toISOString().split('T')[0];
+    return getLocalDateStr(d);
   });
 
   const weeklyData = daysOfWeek.map((dayLabel, idx) => {

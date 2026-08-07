@@ -12,6 +12,7 @@ import {
   removeFriendInDb,
   getTodayStepsForFriends
 } from '../firebase';
+import { getLocalDateStr } from '../utils/fitnessEngine';
 
 export function SocialLeaderboardModal({ 
   currentUser, 
@@ -61,7 +62,7 @@ export function SocialLeaderboardModal({
     Promise.resolve(getFriendsListFromDb(myUid)).then(baseFriends => {
       const list = Array.isArray(baseFriends) ? baseFriends : [];
       setFriendsList(list);
-      const todayStr = new Date().toISOString().split('T')[0];
+      const todayStr = getLocalDateStr();
       getTodayStepsForFriends(list, todayStr).then(liveFriends => {
         setFriendsWithLiveSteps(liveFriends);
       });
