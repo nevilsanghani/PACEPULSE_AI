@@ -29,14 +29,15 @@ import {
   fetchUserProfileDoc,
   saveUserProfileToDb
 } from './firebase';
-import { 
-  DEFAULT_PROFILE, 
-  calculateCalories, 
-  calculateDistanceKm, 
-  calculateAgeFromBirthDate, 
-  calculateBMR, 
-  calculateStrideCm 
+import {
+  DEFAULT_PROFILE,
+  calculateCalories,
+  calculateDistanceKm,
+  calculateAgeFromBirthDate,
+  calculateBMR,
+  calculateStrideCm
 } from './utils/fitnessEngine';
+import { computeStepDelta } from './utils/stepReconciliation';
 
 // Generate 24 empty hourly buckets (00:00 to 23:00)
 function generateEmptyHourlyData() {
@@ -402,24 +403,7 @@ export default function App() {
       setHourlyData(prev => {
         const currentTotal = prev.reduce((sum, h) => sum + (h.steps || 0), 0);
         const hour = new Date().getHours();
-        let deltaToAdd;
-
-        if (previousNativeTotal === null) {
-          // First native reading this session. Never subtract - only add
-          // whatever portion of native's count isn't reflected in the
-          // currently-displayed total yet. This covers real steps taken
-          // during the brief window before the ready-gate opened (native
-          // already nonzero on its very first reading) WITHOUT discarding a
-          // correctly cloud-restored total when native's fresh reading is
-          // lower (e.g. right after a reinstall wiped its local baseline).
-          deltaToAdd = Math.max(totalSteps - currentTotal, 0);
-        } else if (totalSteps < previousNativeTotal) {
-          // Native's own count dropped below what we last saw - its local
-          // baseline was reset. Re-anchor without touching the display.
-          deltaToAdd = 0;
-        } else {
-          deltaToAdd = totalSteps - previousNativeTotal;
-        }
+        const deltaToAdd = computeStepDelta({ previousNativeTotal, totalSteps, currentTotal });
 
         if (deltaToAdd <= 0) return prev;
 
@@ -630,6 +614,7 @@ export default function App() {
   const handleResetBaseline = () => {
     const emptyHourly = generateEmptyHourlyData();
     setHourlyData(emptyHourly);
+    lastNativeTotalRef.current = null;
     setTodayElevationM(0);
     setShowResetModal(false);
 
