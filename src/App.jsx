@@ -305,7 +305,19 @@ export default function App() {
         caloriesData,
         hourlyData,
         todayElevationM
-      ).then(() => setCloudSyncStatus('synced'));
+      ).then((ok) => {
+        // A failed write (timeout, permission hiccup, WebView network flakiness)
+        // used to be silently dropped here with no retry and a false "synced"
+        // status - queue it for the next 'online' event instead, same as an
+        // actually-offline write, so a transient failure can't permanently
+        // lose a day's data before the local queue itself gets wiped.
+        if (ok) {
+          setCloudSyncStatus('synced');
+        } else {
+          queueOfflineDailyLog(user.uid, todayStr, totalDailySteps, profile.dailyGoal, caloriesData, hourlyData, todayElevationM);
+          setCloudSyncStatus('offline');
+        }
+      });
     } else {
       queueOfflineDailyLog(
         user.uid,

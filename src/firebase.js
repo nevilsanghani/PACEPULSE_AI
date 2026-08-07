@@ -276,7 +276,7 @@ export function purgeLocalDbAccount(email) {
  * Save Daily Step Log to Firestore Database (Includes 24 Hourly Buckets!)
  */
 export async function saveDailyLogsToDb(uid, dateStr, totalSteps, goal, caloriesData, hourlyData, elevationGainM = 0) {
-  if (!uid || uid === 'guest') return;
+  if (!uid || uid === 'guest') return false;
 
   try {
     const hourlyValues = (hourlyData || []).map(h => ({
@@ -328,8 +328,12 @@ export async function saveDailyLogsToDb(uid, dateStr, totalSteps, goal, calories
 
     if (res && res.ok) {
       console.log(`✅ Daily Log for ${dateStr} saved to Firestore 'users/${uid}/daily_logs'!`);
+      return true;
     }
-  } catch (e) {}
+    return false;
+  } catch (e) {
+    return false;
+  }
 }
 
 /**
@@ -1074,11 +1078,21 @@ export async function getDailyLogsFromDb(uid) {
   if (!uid || uid === 'guest') return [];
 
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 6000);
-
-    const res = await firestoreFetch(`${FIRESTORE_REST_BASE}/users/${uid}/daily_logs`, { signal: controller.signal }).catch(() => null);
-    clearTimeout(timeoutId);
+    // This is the sole hydration path for a user's entire step/goal history after
+    // login (e.g. right after a reinstall, when the local cache has just been
+    // wiped) - a single timed-out request here used to silently render as "no
+    // history" with no retry, even though the data was still safe in Firestore.
+    // One retry with a longer timeout gives a cold-started WebView (fresh
+    // install, first network call, OS still finishing package setup) a second
+    // chance before giving up.
+    let res = null;
+    for (const timeoutMs of [8000, 15000]) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+      res = await firestoreFetch(`${FIRESTORE_REST_BASE}/users/${uid}/daily_logs`, { signal: controller.signal }).catch(() => null);
+      clearTimeout(timeoutId);
+      if (res && res.ok) break;
+    }
 
     if (res && res.ok) {
       const data = await res.json();
