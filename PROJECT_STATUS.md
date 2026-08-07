@@ -2,126 +2,110 @@
 
 > Reference doc. Kept up to date after each major work session so status can be
 > checked without re-reading the whole codebase or chat history.
-> Last updated: 2026-08-06.
+> Last updated: 2026-08-07.
 
 ## What this app is
 
 React 18 + Vite app, wrapped by a native Kotlin/Android Studio WebView shell
 (`pacepulse-android/`) for real device sensors (step counter, barometer,
 native share intents). **Product direction: Android app now, Mac app later —
-not a public website.** Netlify is kept only as a backend API host (serverless
-functions), not a hosted site.
+not a public website.**
 
-Backend: Firebase (Authentication + Firestore). No custom Node/Express server.
+Backend, current architecture:
+- **Firebase** — Authentication (real accounts, Google-managed password
+  hashing) + Firestore (app data), locked down by `firestore.rules`.
+- **Cloudflare Worker** (`pacepulse-worker/`) — the *only* custom backend.
+  Sends/verifies 4-digit signup and password-reset codes, and performs the
+  actual password update via a Firebase Admin-authenticated call. Free tier,
+  no credit card. Replaced Netlify entirely (see "Major pivot" below).
+- **EmailJS** — sends the actual OTP emails, called only from the Worker
+  (never from the app), authenticated with a private key so the account isn't
+  exposed even though the public key lives in this public GitHub repo.
+
+No Netlify, no Node/Express server, no `firebase-admin` npm package anywhere
+(Cloudflare Workers can't run it — see the Worker's `firebaseAdmin.js`, which
+hand-rolls the Google OAuth2/JWT signing instead).
+
+---
+
+## History in brief
+
+**Session 1** — found and fixed a live security hole: the original hand-rolled
+Firestore client had zero authentication; anyone could read/write the whole
+database anonymously, including plaintext passwords. Migrated to real Firebase
+Auth + locked Firestore rules + server-side OTP verification (originally via
+Netlify Functions). Also fixed: false step-counting in vehicles, added
+elevation-gain tracking, fixed broken WhatsApp/Instagram sharing, added
+account deletion, converted Netlify from a public website to a backend-only
+API host to match the Android-only product direction.
+
+**Session 2 (major pivot)** — Netlify ran out of free-tier credits and
+stopped deploying. Diagnosed and fixed two real bugs along the way (a missing
+Google Cloud IAM role blocking Firestore writes; an EmailJS security setting
+blocking server-side calls) — but rather than keep depending on Netlify's
+credit-limited hosting, first tried removing the custom backend entirely and
+using Firebase's own built-in email verification/reset. That turned out to be
+unreliable specifically for this project (confirmed via a side-by-side test:
+a brand-new throwaway Firebase project sent mail successfully, this project's
+did not) and landed in spam even when it worked. **Final fix**: rebuilt the
+same OTP backend on **Cloudflare Workers** instead of Netlify — free tier,
+no credit card, no surprise credit exhaustion, and it works.
 
 ---
 
-## Status BEFORE this session
+## Current auth flow (as of 2026-08-07)
 
-- **Security: broken.** `src/firebase.js` was a hand-rolled Firestore REST
-  client with no authentication at all. Confirmed live with a plain anonymous
-  `curl` that the entire database — including account passwords — could be
-  read and written by anyone, no login required. Passwords were stored in
-  plaintext.
-- OTP codes (signup verification, password reset) were generated and checked
-  entirely in client-side JavaScript — trivially bypassable, and one bug even
-  displayed the code directly in the UI ("Resend OTP" button).
-- Step counting had no motion-state filtering: riding in a car/bus/train
-  registered as steps from vibration.
-- No elevation/floors-climbed tracking.
-- WhatsApp/Instagram "share to story" gave a "page not found" error.
-- Signup/reset emails weren't sent through a proper branded flow.
-- No way for a user to delete their own account.
-- The project was set up as a Netlify-hosted public website (from before the
-  Android-only decision was made).
+1. **Signup**: user fills the form → app asks the Worker to email a 4-digit
+   code (via EmailJS) → user types the code back in → **Worker verifies the
+   code server-side first** → only then does the app create the real Firebase
+   Auth account. An unverified account is never created — this is what makes
+   the flow unbypassable from a modified client.
+2. **Forgot password**: user enters email → Worker checks the account
+   actually exists (via Firebase Admin lookup) before sending anything → user
+   receives and types the 4-digit code → **code is verified immediately**
+   (this used to only happen when the new password was submitted — fixed,
+   see below) → user sets a new password → Worker verifies the code again and
+   updates the password via a Firebase Admin-authenticated call → app signs
+   the user in with the new password.
+3. Both flows are rate-limited: 5 wrong-code guesses invalidates the code.
 
-## Status AFTER this session
+Two UX bugs found and fixed during testing:
+- Reset code used to only be checked when the *new password* was submitted,
+  so a wrong code wasn't caught until after filling out the whole next
+  screen. Now checked immediately via a dedicated `verify-reset-otp` Worker
+  endpoint.
+- Password-reset emails used to send even for an email with no account.
+  Worker now looks the account up first and returns "no account found"
+  instead of sending anything.
 
-### 1. Full security migration (the critical fix)
-User's requirement, verbatim: *"full proof security for user data... even
-admin person should not be able to read password... I don't want interim
-solution but I want end to end data security fix."*
+## Key secrets and where they live
 
-- **Real Firebase Authentication** replaces the hand-rolled credential system.
-  Passwords are hashed by Google's infrastructure; nobody — not the app, not
-  an admin, not anyone holding the Firebase Admin key — can ever read a
-  password back. Admin access can only *overwrite* a password, never see one.
-- **Firestore Security Rules** (`firestore.rules`, repo root) now require a
-  real signed-in Firebase identity for every read/write. Anonymous access is
-  completely closed. `signup_otps`/`reset_otps` collections are walled off
-  from every client (`allow read, write: if false`) — only server code with
-  the Admin credential can touch them.
-- **OTP verification moved server-side.** New Netlify Functions
-  (`netlify/functions/send-signup-otp.js`, `verify-signup-and-create-account.js`,
-  `send-reset-otp.js`, `confirm-password-reset.js`) generate and check codes
-  using the Firebase Admin SDK. A signup account **does not exist** until the
-  server itself confirms the code was correct — the client can no longer
-  skip or fake this check.
-- **Brute-force protection**: OTP verification attempts are capped
-  (`MAX_OTP_ATTEMPTS = 5` in `netlify/functions/_shared/firebaseAdmin.js`).
-- **Strong password validation**, enforced both client-side
-  (`src/utils/passwordPolicy.js`) and server-side
-  (`netlify/functions/_shared/passwordPolicy.js`): min 8 chars, upper+lower+digit.
-- **Legacy account migration**: the one account created before this migration
-  (password-hash based) is automatically upgraded to a real Firebase Auth
-  account the first time it successfully logs in, then its old data is moved
-  over and the old Firestore doc is removed.
+| Secret | Lives in | What it can do if leaked |
+|---|---|---|
+| `FIREBASE_SERVICE_ACCOUNT` (Google service-account JSON) | Cloudflare Worker encrypted secret only | Highest value target — can reset any user's password (never read one) and read/write Firestore profile data. Never in any file or the repo. |
+| `EMAILJS_PRIVATE_KEY` | Cloudflare Worker encrypted secret only | Low value — could only send spam through the EmailJS account, no access to any user data. |
+| Firebase Web API key (`src/firebase.js`) | Public, committed in the repo | Not a secret by design — this is normal for every Firebase app; real access control is Firestore Security Rules + Firebase Auth, not hiding this key. |
+| Cloudflare API token used to deploy the Worker | Never saved to any file — only used transiently in terminal sessions | Could modify the Worker if stolen, but has no persistent storage anywhere. |
 
-### 2. Delete Account feature
-New `src/components/DeleteAccountModal.jsx` — user must type `DELETE` to
-confirm. Removes the Firestore profile/subcollections and the real Firebase
-Auth credential.
-
-### 3. False step counting in vehicles — fixed
-Android now uses the Activity Recognition Transition API
-(`NativeStepManager.kt`, `MotionStateReceiver.kt`) to gate step counting to
-WALKING/RUNNING states only; `IN_VEHICLE` vibration no longer counts as steps.
-
-### 4. Elevation Gain feature — added
-New `ElevationManager.kt` reads the barometric pressure sensor, gated by the
-same motion-state check (elevators/vehicles are rejected). Surfaced in the UI
-via `src/components/ElevationWidget.jsx`, using `metersToFloors()` in
-`src/utils/fitnessEngine.js`.
-
-### 5. WhatsApp/Instagram sharing — fixed
-Native Android share intents
-(`com.whatsapp.action.SHARE_TO_STATUS`, `com.instagram.share.ADD_TO_STORY`)
-with a proper `FileProvider`, replacing the broken web-link based sharing that
-produced "page not found."
-
-### 6. Branded signup/reset emails — fixed
-Emails are sent via EmailJS from the server-side Netlify functions, branded
-as "PacePulse AI", with no confirmation-subscription friction.
-
-### 7. Netlify: converted from public website to backend-only API
-Per user's explicit product pivot (Android + future Mac, not a website):
-- `netlify.toml` — no-op build, publishes a placeholder-only `netlify/public/`,
-  keeps `[functions]` directory.
-- `src/components/AuthModal.jsx` calls the Netlify Functions via an absolute
-  URL (`https://endearing-horse-9fc93a.netlify.app`) with CORS enabled, since
-  the Android WebView is a different origin than the API host.
-- Repo is now linked to Netlify via GitHub (continuous deployment), replacing
-  the earlier manual "Netlify Drop" uploads.
-
-### 8. Build/tooling fixes
-- `pacepulse-android/gradle.properties` tuned for this machine's low RAM
-  (3.9GB): `-Xmx768m -XX:MaxMetaspaceSize=256m`, daemon/parallel/kotlin-incremental
-  disabled. Required for `assembleDebug` to succeed here.
-- Debug APK builds successfully:
-  `pacepulse-android/app/build/outputs/apk/debug/app-debug.apk`.
-
----
+**Pending, not yet done**: turning on 2FA on the Cloudflare account and the
+Google account that owns the Firebase project (`pacepulseai@gmail.com` for
+both) — the single most impactful remaining hardening step, since those two
+accounts are what actually protect the `FIREBASE_SERVICE_ACCOUNT` secret.
 
 ## Known residual limitations (by design / not yet addressed)
 
 - Any signed-in user can read other users' profile/step data (needed for the
-  existing friend-search/leaderboard features) — only the account owner can
-  *write* their own data. This is intentional, unchanged from before.
-- The Firebase Admin service-account private key was pasted into chat once
-  during setup. Not currently a live risk (never committed to the repo), but
-  rotating it in the Firebase Console is a good hygiene step whenever convenient.
+  friend-search/leaderboard features) — only the account owner can *write*
+  their own data. Intentional, unchanged.
+- 2FA not yet enabled on Cloudflare/Google accounts (see above).
+- Firebase's own email template branding (Console → Authentication →
+  Templates) is currently blocked by a Firebase-side Console bug for this
+  project ("Email template updates are currently unavailable") — cosmetic
+  only, doesn't affect anything since email sending no longer goes through
+  Firebase's mailer anyway. Not worth pursuing further; EmailJS's own
+  template controls the actual email content now.
 
-## Key files touched this session
+## Key files touched (cumulative)
 
 | Area | Files |
 |---|---|
@@ -130,17 +114,21 @@ Per user's explicit product pivot (Android + future Mac, not a website):
 | App boot | `src/App.jsx` |
 | Password policy | `src/utils/passwordPolicy.js` |
 | Elevation | `src/components/ElevationWidget.jsx`, `src/utils/fitnessEngine.js` |
-| Netlify functions | `netlify/functions/*.js`, `netlify/functions/_shared/*.js` |
-| Netlify config | `netlify.toml`, `netlify/public/index.html` |
+| Sharing | `src/components/ShareModal.jsx` |
+| **Cloudflare Worker (current backend)** | `pacepulse-worker/src/index.js`, `emailjs.js`, `firebaseAdmin.js`, `passwordPolicy.js`, `pacepulse-worker/wrangler.toml` |
 | Firestore rules | `firestore.rules` |
 | Android native | `pacepulse-android/app/src/main/java/com/pacepulse/ai/NativeStepManager.kt`, `MotionStateReceiver.kt`, `ElevationManager.kt`, `MainActivity.kt`, `StepTrackingService.kt` |
 | Android build config | `pacepulse-android/gradle.properties` |
+| Retired (no longer used) | `netlify/` (Netlify Functions, kept in repo history but not deployed/relied on), Firebase's native `sendEmailVerification`/`sendPasswordResetEmail` |
 
 ## Suggested test order for the current APK
 
-1. Fresh signup — verify wrong OTP code is rejected, weak password is rejected.
+1. Fresh signup with a real email — confirm the 4-digit code actually arrives
+   and a wrong code is rejected.
 2. Sign out / sign back in.
-3. Forgot password flow end-to-end.
+3. Forgot password: wrong code shows an immediate error; correct code lets
+   you set a new password; an email with no account says so without sending
+   anything.
 4. On a physical device: ride in a car and confirm steps don't increase;
    confirm elevation is rejected in an elevator/vehicle but counted on stairs.
 5. WhatsApp/Instagram "share to story."
