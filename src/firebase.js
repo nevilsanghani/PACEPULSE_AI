@@ -635,27 +635,11 @@ export async function validateUserExistsInDb(searchQuery) {
     }
   } catch (e) {}
 
-  // 3. Fallback: Check local accounts
-  const localAccounts = getLocalDbAccounts();
-  for (const emailKey in localAccounts) {
-    const acc = localAccounts[emailKey];
-    const accTag = (acc.username || '').toLowerCase().replace('@', '');
-    const accEmail = (acc.email || '').toLowerCase();
-    const accPrefix = accEmail.split('@')[0];
-
-    if (accTag === clean || accEmail === clean || accPrefix === clean) {
-      return {
-        exists: true,
-        targetUser: {
-          uid: acc.uid,
-          displayName: acc.displayName || acc.profile?.name || clean,
-          email: acc.email,
-          username: acc.username || `@${accPrefix}`
-        }
-      };
-    }
-  }
-
+  // Deliberately no local-cache fallback here: `pacepulse_accounts` is a leftover
+  // from before real Firebase Authentication existed, nothing writes new entries
+  // into it anymore, and trusting it let searches "find" and send requests to
+  // accounts that had been fully deleted from the real database - the DB is the
+  // only thing that should ever get to say an account exists.
   return { exists: false, error: `No user found matching "${searchQuery}" in Cloud Database. Please check the spelling.` };
 }
 
