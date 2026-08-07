@@ -115,6 +115,13 @@ export default function App() {
     return saved ? JSON.parse(saved) : [];
   });
 
+  // Gates window.syncNativeTodaySteps until the authoritative hourly breakdown has
+  // been restored from Firestore after login - without this, the native step poll
+  // (fires every 1s) can race ahead of that async fetch and reconstruct "current
+  // hour = today's total minus everything else recorded so far" against a still-empty
+  // array, dumping the whole day's steps into the current hour bucket.
+  const hourlyDataReadyRef = React.useRef(!user || user.uid === 'guest');
+
   // Calculate sum of steps from 24 hourly buckets
   const totalDailySteps = hourlyData.reduce((sum, h) => sum + (h.steps || 0), 0);
 
@@ -161,6 +168,7 @@ export default function App() {
 
   useEffect(() => {
     if (!user || user.uid === 'guest') return;
+    hourlyDataReadyRef.current = false;
     refreshPendingRequests();
 
     // Fetch remote logs from Cloud Firestore for weekly chart & history
@@ -180,6 +188,8 @@ export default function App() {
           setTodayElevationM(todayLog.elevationGainM);
         }
       }
+    }).finally(() => {
+      hourlyDataReadyRef.current = true;
     });
 
     const intervalId = setInterval(() => {
@@ -328,6 +338,10 @@ export default function App() {
   useEffect(() => {
     window.syncNativeTodaySteps = (totalSteps) => {
       if (typeof totalSteps !== 'number' || isNaN(totalSteps)) return;
+      // Skip while the authoritative hourly breakdown is still loading from Firestore
+      // after a login - otherwise this can race ahead of that fetch and reconstruct
+      // today's whole step total into the current hour against a stale/empty array.
+      if (!hourlyDataReadyRef.current) return;
 
       setHourlyData(prev => {
         const next = [...prev];
@@ -407,7 +421,12 @@ export default function App() {
       }
     }
 
-    // Load isolated hourly data for authenticated user
+    // Load isolated hourly data for authenticated user. Not "ready" yet - the native
+    // step poll must not touch hourlyData until the Firestore fetch below (the
+    // authoritative source) has had a chance to correct this local copy, otherwise a
+    // poll tick racing ahead of that fetch would reconstruct today's whole step total
+    // into the current hour against this possibly-stale/empty array.
+    hourlyDataReadyRef.current = false;
     const hourlyKey = getUserKey('pacepulse_hourly', authenticatedUser);
     const savedHourly = localStorage.getItem(hourlyKey);
     if (savedHourly) {
@@ -430,21 +449,27 @@ export default function App() {
     setTodayElevationM(savedElevation !== null ? parseFloat(savedElevation) : 0);
 
     if (authenticatedUser.uid && authenticatedUser.uid !== 'guest') {
-      const remoteLogs = await getDailyLogsFromDb(authenticatedUser.uid);
-      if (remoteLogs && remoteLogs.length > 0) {
-        const historyKey = getUserKey('pacepulse_history', authenticatedUser);
-        setWeeklyHistory(remoteLogs);
-        localStorage.setItem(historyKey, JSON.stringify(remoteLogs));
+      try {
+        const remoteLogs = await getDailyLogsFromDb(authenticatedUser.uid);
+        if (remoteLogs && remoteLogs.length > 0) {
+          const historyKey = getUserKey('pacepulse_history', authenticatedUser);
+          setWeeklyHistory(remoteLogs);
+          localStorage.setItem(historyKey, JSON.stringify(remoteLogs));
 
-        const todayLog = remoteLogs.find(l => l.date === todayStr);
-        if (todayLog && todayLog.hourlyData && Array.isArray(todayLog.hourlyData) && todayLog.hourlyData.length === 24) {
-          setHourlyData(todayLog.hourlyData);
-          localStorage.setItem(hourlyKey, JSON.stringify(todayLog.hourlyData));
+          const todayLog = remoteLogs.find(l => l.date === todayStr);
+          if (todayLog && todayLog.hourlyData && Array.isArray(todayLog.hourlyData) && todayLog.hourlyData.length === 24) {
+            setHourlyData(todayLog.hourlyData);
+            localStorage.setItem(hourlyKey, JSON.stringify(todayLog.hourlyData));
+          }
+          if (todayLog && typeof todayLog.elevationGainM === 'number') {
+            setTodayElevationM(todayLog.elevationGainM);
+          }
         }
-        if (todayLog && typeof todayLog.elevationGainM === 'number') {
-          setTodayElevationM(todayLog.elevationGainM);
-        }
+      } finally {
+        hourlyDataReadyRef.current = true;
       }
+    } else {
+      hourlyDataReadyRef.current = true;
     }
   };
 

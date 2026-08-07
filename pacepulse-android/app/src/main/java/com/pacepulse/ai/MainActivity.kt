@@ -4,6 +4,7 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.content.ActivityNotFoundException
 import android.content.ClipData
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -11,13 +12,17 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.MediaStore
 import android.util.Base64
 import android.util.Log
 import android.webkit.ConsoleMessage
 import android.webkit.JavascriptInterface
+import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -25,6 +30,7 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -44,6 +50,17 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     private lateinit var sensorManager: SensorManager
     private var stepCounterSensor: Sensor? = null
     private var pressureSensor: Sensor? = null
+
+    // Web <input type="file"> chooser state (camera capture / gallery pick for the
+    // share-card photo overlay feature)
+    private var filePathCallback: ValueCallback<Array<Uri>>? = null
+    private var pendingCameraImageUri: Uri? = null
+
+    companion object {
+        private const val REQUEST_ACTIVITY_RECOGNITION = 101
+        private const val REQUEST_CAMERA_PERMISSION = 201
+        private const val REQUEST_FILE_CHOOSER = 202
+    }
 
     inner class AndroidStepBridge {
         @JavascriptInterface
@@ -137,6 +154,52 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                 }
             }
         }
+
+        /**
+         * Saves a base64-encoded image straight into the device's Photos gallery via
+         * MediaStore - a plain `<a download>` click inside the WebView silently does
+         * nothing, since WebView has no built-in handler for data: URI downloads.
+         */
+        @JavascriptInterface
+        fun saveImageToGallery(base64Image: String, fileName: String) {
+            runOnUiThread {
+                try {
+                    val bytes = Base64.decode(base64Image, Base64.DEFAULT)
+                    val resolver = contentResolver
+
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        val values = ContentValues().apply {
+                            put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
+                            put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+                            put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/PacePulse")
+                            put(MediaStore.Images.Media.IS_PENDING, 1)
+                        }
+                        val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                        if (uri == null) {
+                            Toast.makeText(this@MainActivity, "Could not save image", Toast.LENGTH_SHORT).show()
+                            return@runOnUiThread
+                        }
+                        resolver.openOutputStream(uri)?.use { it.write(bytes) }
+                        values.clear()
+                        values.put(MediaStore.Images.Media.IS_PENDING, 0)
+                        resolver.update(uri, values, null, null)
+                    } else {
+                        // Pre-scoped-storage (API < 29): write directly to the public
+                        // Pictures directory and register it with the media scanner.
+                        val picturesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
+                        val targetDir = File(picturesDir, "PacePulse").apply { mkdirs() }
+                        val targetFile = File(targetDir, fileName)
+                        FileOutputStream(targetFile).use { it.write(bytes) }
+                        MediaScannerConnection.scanFile(this@MainActivity, arrayOf(targetFile.absolutePath), arrayOf("image/png"), null)
+                    }
+
+                    Toast.makeText(this@MainActivity, "Saved to Photos", Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    Log.e("PacePulseBridge", "saveImageToGallery failed: ${e.message}")
+                    Toast.makeText(this@MainActivity, "Could not save image", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
     }
 
     /** Decodes a base64 JPEG, writes it to cache, and returns a FileProvider content:// URI. */
@@ -150,6 +213,58 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         } catch (e: Exception) {
             Log.e("PacePulseBridge", "writeShareImage failed: ${e.message}")
             null
+        }
+    }
+
+    /**
+     * Entry point for the web <input type="file"> "Take Photo / Upload Image" control.
+     * Requests CAMERA permission first (if not already granted) before offering the
+     * camera option, per the requirement that permission must be asked before the
+     * camera itself is opened - a denial just falls back to gallery-only selection
+     * rather than blocking the feature entirely.
+     */
+    private fun launchImageChooser() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.CAMERA), REQUEST_CAMERA_PERMISSION)
+            return
+        }
+        openImageChooser(allowCamera = true)
+    }
+
+    /** Combines a camera-capture intent and a gallery picker into a single chooser dialog. */
+    private fun openImageChooser(allowCamera: Boolean) {
+        val galleryIntent = Intent(Intent.ACTION_GET_CONTENT).apply {
+            type = "image/*"
+            addCategory(Intent.CATEGORY_OPENABLE)
+        }
+
+        var cameraIntent: Intent? = null
+        if (allowCamera) {
+            try {
+                val dir = File(cacheDir, "share").apply { mkdirs() }
+                val photoFile = File(dir, "camera_capture_${System.currentTimeMillis()}.jpg")
+                val cameraUri = FileProvider.getUriForFile(this, "$packageName.fileprovider", photoFile)
+                pendingCameraImageUri = cameraUri
+                cameraIntent = Intent(MediaStore.ACTION_IMAGE_CAPTURE).apply {
+                    putExtra(MediaStore.EXTRA_OUTPUT, cameraUri)
+                    addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                }
+            } catch (e: Exception) {
+                Log.e("PacePulseBridge", "Camera intent setup failed: ${e.message}")
+            }
+        }
+
+        val chooserIntent = Intent.createChooser(galleryIntent, "Choose or Capture a Photo")
+        if (cameraIntent != null && cameraIntent.resolveActivity(packageManager) != null) {
+            chooserIntent.putExtra(Intent.EXTRA_INITIAL_INTENTS, arrayOf(cameraIntent))
+        }
+
+        try {
+            @Suppress("DEPRECATION")
+            startActivityForResult(chooserIntent, REQUEST_FILE_CHOOSER)
+        } catch (e: ActivityNotFoundException) {
+            filePathCallback?.onReceiveValue(null)
+            filePathCallback = null
         }
     }
 
@@ -194,7 +309,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                 perms.add(Manifest.permission.POST_NOTIFICATIONS)
             }
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACTIVITY_RECOGNITION) != PackageManager.PERMISSION_GRANTED) {
-                ActivityCompat.requestPermissions(this, perms.toTypedArray(), 101)
+                ActivityCompat.requestPermissions(this, perms.toTypedArray(), REQUEST_ACTIVITY_RECOGNITION)
             }
         }
 
@@ -251,6 +366,17 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             webChromeClient = object : WebChromeClient() {
                 override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
                     Log.d("PacePulseJS", "${consoleMessage?.message()}")
+                    return true
+                }
+
+                override fun onShowFileChooser(
+                    webView: WebView?,
+                    callback: ValueCallback<Array<Uri>>?,
+                    fileChooserParams: FileChooserParams?
+                ): Boolean {
+                    filePathCallback?.onReceiveValue(null)
+                    filePathCallback = callback
+                    launchImageChooser()
                     return true
                 }
             }
@@ -323,9 +449,36 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == 101 && grantResults.any { it == PackageManager.PERMISSION_GRANTED }) {
+        if (requestCode == REQUEST_ACTIVITY_RECOGNITION && grantResults.any { it == PackageManager.PERMISSION_GRANTED }) {
             NativeStepManager.registerMotionTransitionUpdates(this)
+        } else if (requestCode == REQUEST_CAMERA_PERMISSION) {
+            val granted = grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
+            // Denied is still a valid outcome for the share-photo feature - just offer
+            // gallery selection instead of blocking the whole "Take Photo / Upload
+            // Image" control.
+            openImageChooser(allowCamera = granted)
         }
+    }
+
+    @Suppress("DEPRECATION")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQUEST_FILE_CHOOSER) return
+
+        val callback = filePathCallback
+        filePathCallback = null
+        if (callback == null) return
+
+        if (resultCode != RESULT_OK) {
+            callback.onReceiveValue(null)
+            return
+        }
+
+        // A gallery pick returns its own content:// Uri in `data`; a camera capture
+        // returns no data at all since the photo was written directly to the Uri we
+        // supplied as EXTRA_OUTPUT when launching it.
+        val resultUri = data?.data ?: pendingCameraImageUri
+        callback.onReceiveValue(if (resultUri != null) arrayOf(resultUri) else null)
     }
 
     override fun onBackPressed() {

@@ -21,9 +21,33 @@ import java.util.Locale
 /**
  * PacePulse AI - Absolute 24/7 Monotonic Hardware Step Counter Engine
  * Guarantees step counts NEVER decrease and tracks walking 100% accurately per user.
- * Rejects hardware step-counter increments that occur while Activity Recognition
- * classifies the user as IN_VEHICLE (e.g. riding in an auto/car), so vehicle vibration
- * never inflates the day's step count.
+ *
+ * False-step defenses in effect (see processCumulativeStep for the actual logic):
+ *  1. Vehicle rejection - hardware ticks while Activity Recognition confirms IN_VEHICLE
+ *     (auto/car/bus vibration) are excluded.
+ *  2. Still rejection - hardware ticks while confirmed STILL (sitting/standing and
+ *     fidgeting, phone handling in a pocket) are excluded. Trade-off: because Activity
+ *     Recognition takes a few seconds to confirm a new state, the very first steps of a
+ *     fresh walk can occasionally be missed rather than a fidget being over-counted -
+ *     deliberate, since the user-reported problem is over-counting, not under-counting.
+ *  3. Cycling rejection - hardware ticks while confirmed ON_BICYCLE are excluded
+ *     (pedaling can trigger the step sensor on some devices).
+ *  4. Cadence sanity cap - every single sensor tick's delta is capped against how many
+ *     real steps a human could plausibly take in the elapsed time since the last tick
+ *     (generous ceiling, well above sprinting pace). This is what stops a single
+ *     anomalous OEM sensor burst/batching glitch from permanently inflating the count,
+ *     since the count is monotonic (never decreases) once accepted. Genuine large step
+ *     counts delivered after a real gap (e.g. phone asleep in pocket during a long walk)
+ *     are still accepted in full, since the allowance scales with elapsed time.
+ *  5. Duplicate-tick short-circuit - if the hardware total hasn't actually changed since
+ *     the last processed reading (the foreground screen and the 24/7 background service
+ *     both listen to the same sensor), the redundant call is a no-op instead of
+ *     re-running prefs writes / UI push / widget update for nothing.
+ *
+ * NOT covered (inherent hardware/OS limits, not fixable in app code): a small number of
+ * false positives from the phone's own step-counter firmware while genuinely walking-like
+ * motion happens without walking (e.g. vigorously shaking the phone in hand) - Activity
+ * Recognition would classify that as WALKING too, since it can't distinguish intent.
  */
 object NativeStepManager {
 
@@ -31,13 +55,23 @@ object NativeStepManager {
     const val KEY_MOTION_STATE = "current_motion_state"
     const val KEY_MOTION_STATE_UPDATED_AT = "motion_state_updated_at"
 
-    // No human takes more than this many real steps between two TYPE_STEP_COUNTER
-    // events (which fire per-step) - defends against a single garbage sensor burst.
+    // Floor for the cadence cap on very-short-elapsed ticks (no human takes more than
+    // this many real steps in a single TYPE_STEP_COUNTER callback interval).
     private const val MAX_DELTA_PER_TICK = 20f
+    // Generous sustained cadence ceiling (well above sprinting) used to scale the cap
+    // for longer gaps between ticks, e.g. a batch of ticks delivered after the phone
+    // was asleep for several minutes during a real walk.
+    private const val MAX_STEPS_PER_SECOND = 5f
+    private val EXCLUDED_MOTION_STATES = setOf(
+        DetectedActivity.IN_VEHICLE,
+        DetectedActivity.STILL,
+        DetectedActivity.ON_BICYCLE
+    )
     private const val MOTION_TRANSITION_REQUEST_CODE = 4001
 
     private var activeUid: String = "guest"
     private var lastKnownHardwareTotal: Float = -1f
+    private var lastEventTimestampMs: Long = -1L
 
     private fun getTodayStr(): String {
         return SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
@@ -141,7 +175,8 @@ object NativeStepManager {
     @Synchronized
     fun processCumulativeStep(context: Context, currentTotal: Float, webView: WebView?): Int {
         val previousHardwareTotal = lastKnownHardwareTotal
-        lastKnownHardwareTotal = currentTotal
+        val previousEventTimestampMs = lastEventTimestampMs
+        val now = System.currentTimeMillis()
 
         val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val todayStr = getTodayStr()
@@ -153,6 +188,25 @@ object NativeStepManager {
         val savedDate = prefs.getString(keyDate, "")
         var midnightBaseline = prefs.getFloat(keyBaseline, -1f)
 
+        // Duplicate-tick short-circuit: the foreground screen and the 24/7 background
+        // service both listen to the same hardware sensor, so the same reading often
+        // arrives twice. If nothing actually changed, skip redundant prefs writes / UI
+        // push / widget update instead of reprocessing an identical value.
+        if (currentTotal == previousHardwareTotal && savedDate == todayStr && midnightBaseline >= 0f) {
+            val alreadySaved = prefs.getInt(keySteps, 0)
+            if (webView != null) {
+                webView.post {
+                    webView.evaluateJavascript(
+                        "if(window.syncNativeTodaySteps){ window.syncNativeTodaySteps($alreadySaved, '$activeUid'); }", null
+                    )
+                }
+            }
+            return alreadySaved
+        }
+
+        lastKnownHardwareTotal = currentTotal
+        lastEventTimestampMs = now
+
         // New day or first launch -> Store Midnight Hardware Baseline for active user
         if (savedDate != todayStr || midnightBaseline < 0f) {
             midnightBaseline = currentTotal
@@ -163,17 +217,39 @@ object NativeStepManager {
                 .apply()
             Log.d("PacePulseNative", "New Day Baseline Saved: $midnightBaseline for user $activeUid on $todayStr")
         } else if (previousHardwareTotal >= 0f) {
-            // Reject hardware step-counter increments that occurred while Activity
-            // Recognition says the user is riding in a vehicle (vibration false
-            // positives, e.g. an auto-rickshaw) by advancing the baseline forward so
-            // those ticks are excluded today AND never resurface later.
-            val motionState = prefs.getInt(KEY_MOTION_STATE, DetectedActivity.UNKNOWN)
-            if (motionState == DetectedActivity.IN_VEHICLE) {
-                val instantDelta = (currentTotal - previousHardwareTotal).coerceIn(0f, MAX_DELTA_PER_TICK)
-                if (instantDelta > 0f) {
-                    midnightBaseline += instantDelta
+            val rawInstantDelta = currentTotal - previousHardwareTotal
+            if (rawInstantDelta > 0f) {
+                // Cadence sanity cap - how many real steps a human could plausibly take in
+                // the elapsed time since the last tick. Scales with elapsed time so a
+                // legitimate batch of steps delivered after the phone was asleep in a
+                // pocket is still accepted in full; only an implausibly fast burst (a
+                // sensor glitch) gets capped, which is what stops a one-off spike from
+                // permanently inflating the count (it's monotonic - never decreases once
+                // accepted).
+                val elapsedSec = if (previousEventTimestampMs > 0) {
+                    (now - previousEventTimestampMs).coerceAtLeast(0L) / 1000f
+                } else 0f
+                val plausibleCap = maxOf(MAX_DELTA_PER_TICK, elapsedSec * MAX_STEPS_PER_SECOND)
+                val acceptedDelta = rawInstantDelta.coerceAtMost(plausibleCap)
+                val rejectedByCadence = rawInstantDelta - acceptedDelta
+
+                // Reject hardware ticks that occurred while Activity Recognition confirms
+                // the user isn't actually walking/running (riding in a vehicle, sitting
+                // still and fidgeting, or cycling) by advancing the baseline forward so
+                // those ticks are excluded today AND never resurface later.
+                val motionState = prefs.getInt(KEY_MOTION_STATE, DetectedActivity.UNKNOWN)
+                val excludedByMotion = if (motionState in EXCLUDED_MOTION_STATES) acceptedDelta else 0f
+
+                val totalExcluded = excludedByMotion + rejectedByCadence
+                if (totalExcluded > 0f) {
+                    midnightBaseline += totalExcluded
                     prefs.edit().putFloat(keyBaseline, midnightBaseline).apply()
-                    Log.d("PacePulseNative", "Excluded $instantDelta vehicle-vibration steps for user $activeUid")
+                    if (rejectedByCadence > 0f) {
+                        Log.d("PacePulseNative", "Rejected $rejectedByCadence implausible-cadence steps ($rawInstantDelta in ${elapsedSec}s) for user $activeUid")
+                    }
+                    if (excludedByMotion > 0f) {
+                        Log.d("PacePulseNative", "Excluded $excludedByMotion steps while motion=$motionState for user $activeUid")
+                    }
                 }
             }
         }

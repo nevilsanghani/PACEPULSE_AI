@@ -2,7 +2,19 @@ import React, { useRef, useEffect, useState } from 'react';
 import { X, Share2, Download, Copy, Check, Sparkles, MessageCircle, Instagram, Camera, Image as ImageIcon, Move } from 'lucide-react';
 import { getCelebrationQuote, metersToFloors } from '../utils/fitnessEngine';
 
-export function ShareModal({ steps = 0, goal = 10000, streakDays = 1, caloriesData, profile, elevationM = 0, elevationSupported = true, onClose }) {
+export function ShareModal({ steps: liveSteps = 0, goal: liveGoal = 10000, streakDays: liveStreakDays = 1, caloriesData: liveCaloriesData, profile, elevationM: liveElevationM = 0, elevationSupported = true, onClose }) {
+  // Snapshot the stats once, at the moment the share card opens. The app pushes a
+  // fresh step count roughly every second, and this modal used to read those live
+  // props directly - meaning the whole canvas (gradients, text, shadows) was being
+  // redrawn from scratch every second while the modal stayed open, which is what
+  // was showing up as laggy/stuttering animation. A share card's numbers also
+  // shouldn't visibly shift while someone is in the middle of composing it.
+  const [steps] = useState(liveSteps);
+  const [goal] = useState(liveGoal);
+  const [streakDays] = useState(liveStreakDays);
+  const [caloriesData] = useState(liveCaloriesData);
+  const [elevationM] = useState(liveElevationM);
+
   const showElevation = elevationSupported && elevationM > 0;
   const canvasRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -11,6 +23,19 @@ export function ShareModal({ steps = 0, goal = 10000, streakDays = 1, caloriesDa
   const [customPhotoDataUrl, setCustomPhotoDataUrl] = useState(null);
   const [overlayPosition, setOverlayPosition] = useState('bottom-left'); // 'top-left' | 'top-right' | 'center' | 'bottom-left' | 'bottom-right'
   const [quote, setQuote] = useState(() => getCelebrationQuote(steps, goal, streakDays));
+  const [sharingPlatform, setSharingPlatform] = useState(null); // null | 'whatsapp' | 'instagram' | 'download'
+
+  // Which stats appear on the card - user-customizable. Elevation only defaults on
+  // when the device actually supports it and there's real gain to show.
+  const [selectedStats, setSelectedStats] = useState({
+    steps: true,
+    calories: true,
+    distance: true,
+    movingTime: true,
+    elevation: showElevation,
+    streak: true
+  });
+  const toggleStat = (key) => setSelectedStats(prev => ({ ...prev, [key]: !prev[key] }));
 
   // Handle Photo File Upload / Camera Capture via FileReader for 100% reliability
   const handlePhotoUpload = (e) => {
@@ -118,7 +143,7 @@ export function ShareModal({ steps = 0, goal = 10000, streakDays = 1, caloriesDa
       ctx.fillText('Precision Step & Calorie Story', 80, 145);
 
       // Streak Badge
-      if (streakDays >= 1) {
+      if (selectedStats.streak && streakDays >= 1) {
         ctx.fillStyle = 'rgba(255, 107, 0, 0.22)';
         ctx.strokeStyle = 'rgba(255, 107, 0, 0.7)';
         ctx.lineWidth = 1.5;
@@ -132,7 +157,9 @@ export function ShareModal({ steps = 0, goal = 10000, streakDays = 1, caloriesDa
         ctx.fillText(`🔥 ${streakDays} DAY STREAK`, width - 265, 107);
       }
 
-      // Main Step Count
+      // Main Step Count (steps stays the headline metric even when toggled off
+      // elsewhere - a step-tracking app's card without a step count reads as broken,
+      // so this one line always renders; everything else below is fully optional)
       ctx.fillStyle = '#94A3B8';
       ctx.font = 'bold 18px "Plus Jakarta Sans", system-ui, sans-serif';
       ctx.fillText('STEPS CONQUERED TODAY', 80, 235);
@@ -155,8 +182,9 @@ export function ShareModal({ steps = 0, goal = 10000, streakDays = 1, caloriesDa
       ctx.font = 'bold 18px "Outfit", system-ui, sans-serif';
       ctx.fillText(isGoalHit ? '🎯 GOAL ACHIEVED!' : '⚡ IN PROGRESS', 105, 406);
 
-      // Elevation Gain Pill (only shown when the device supports it & gain > 0)
-      if (showElevation) {
+      // Elevation Gain Pill (only shown when the device supports it, there's real
+      // gain to show, and the user hasn't turned it off)
+      if (selectedStats.elevation && showElevation) {
         ctx.fillStyle = 'rgba(16, 185, 129, 0.18)';
         ctx.strokeStyle = 'rgba(16, 185, 129, 0.55)';
         ctx.lineWidth = 2;
@@ -170,7 +198,9 @@ export function ShareModal({ steps = 0, goal = 10000, streakDays = 1, caloriesDa
         ctx.fillText(`⛰️ ${Math.round(elevationM)}m • ${metersToFloors(elevationM)} floors`, 340, 406);
       }
 
-      // 4 Metrics Grid (2x2 Grid)
+      // Metrics Grid - only the stats the user selected, laid out 2-per-row in the
+      // order chosen rather than fixed slots, so picking 1 or 3 doesn't leave a
+      // visibly broken gap where a hidden card used to be.
       const gridY = 460;
       const boxW = 400;
       const boxH = 120;
@@ -180,61 +210,32 @@ export function ShareModal({ steps = 0, goal = 10000, streakDays = 1, caloriesDa
       const distKm = caloriesData ? caloriesData.distanceKm : 0;
       const durationMins = caloriesData ? caloriesData.durationMins : 0;
 
-      // Card 1: Active Calories
-      ctx.fillStyle = 'rgba(255, 107, 0, 0.15)';
-      ctx.strokeStyle = 'rgba(255, 107, 0, 0.4)';
-      ctx.beginPath();
-      ctx.roundRect(80, gridY, boxW, boxH, 20);
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = '#FF9E44';
-      ctx.font = 'bold 16px "Plus Jakarta Sans", system-ui, sans-serif';
-      ctx.fillText('🔥 ACTIVE CALORIES', 110, gridY + 42);
-      ctx.fillStyle = '#FFFFFF';
-      ctx.font = '800 36px "Outfit", system-ui, sans-serif';
-      ctx.fillText(`${activeKcal} kcal`, 110, gridY + 92);
+      const gridMetrics = [
+        { enabled: selectedStats.calories, bg: 'rgba(255, 107, 0, 0.15)', border: 'rgba(255, 107, 0, 0.4)', labelColor: '#FF9E44', label: '🔥 ACTIVE CALORIES', value: `${activeKcal} kcal` },
+        { enabled: selectedStats.distance, bg: 'rgba(0, 242, 254, 0.15)', border: 'rgba(0, 242, 254, 0.4)', labelColor: '#38BDF8', label: '📍 DISTANCE COVERED', value: `${distKm} km` },
+        { enabled: selectedStats.movingTime, bg: 'rgba(139, 92, 246, 0.15)', border: 'rgba(139, 92, 246, 0.4)', labelColor: '#A78BFA', label: '⏱️ MOVING TIME', value: `${durationMins} mins` },
+        { enabled: true, bg: 'rgba(16, 185, 129, 0.15)', border: 'rgba(16, 185, 129, 0.4)', labelColor: '#34D399', label: '🎯 TARGET GOAL', value: `${goal.toLocaleString()} steps` }
+      ].filter(m => m.enabled);
 
-      // Card 2: Distance
-      ctx.fillStyle = 'rgba(0, 242, 254, 0.15)';
-      ctx.strokeStyle = 'rgba(0, 242, 254, 0.4)';
-      ctx.beginPath();
-      ctx.roundRect(80 + boxW + gap, gridY, boxW, boxH, 20);
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = '#38BDF8';
-      ctx.font = 'bold 16px "Plus Jakarta Sans", system-ui, sans-serif';
-      ctx.fillText('📍 DISTANCE COVERED', 80 + boxW + gap + 30, gridY + 42);
-      ctx.fillStyle = '#FFFFFF';
-      ctx.font = '800 36px "Outfit", system-ui, sans-serif';
-      ctx.fillText(`${distKm} km`, 80 + boxW + gap + 30, gridY + 92);
+      gridMetrics.forEach((metric, idx) => {
+        const col = idx % 2;
+        const row = Math.floor(idx / 2);
+        const boxX = 80 + col * (boxW + gap);
+        const boxY = gridY + row * (boxH + 24);
 
-      // Card 3: Moving Time
-      ctx.fillStyle = 'rgba(139, 92, 246, 0.15)';
-      ctx.strokeStyle = 'rgba(139, 92, 246, 0.4)';
-      ctx.beginPath();
-      ctx.roundRect(80, gridY + boxH + 24, boxW, boxH, 20);
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = '#A78BFA';
-      ctx.font = 'bold 16px "Plus Jakarta Sans", system-ui, sans-serif';
-      ctx.fillText('⏱️ MOVING TIME', 110, gridY + boxH + 24 + 42);
-      ctx.fillStyle = '#FFFFFF';
-      ctx.font = '800 36px "Outfit", system-ui, sans-serif';
-      ctx.fillText(`${durationMins} mins`, 110, gridY + boxH + 24 + 92);
-
-      // Card 4: Daily Goal
-      ctx.fillStyle = 'rgba(16, 185, 129, 0.15)';
-      ctx.strokeStyle = 'rgba(16, 185, 129, 0.4)';
-      ctx.beginPath();
-      ctx.roundRect(80 + boxW + gap, gridY + boxH + 24, boxW, boxH, 20);
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = '#34D399';
-      ctx.font = 'bold 16px "Plus Jakarta Sans", system-ui, sans-serif';
-      ctx.fillText('🎯 TARGET GOAL', 80 + boxW + gap + 30, gridY + boxH + 24 + 42);
-      ctx.fillStyle = '#FFFFFF';
-      ctx.font = '800 36px "Outfit", system-ui, sans-serif';
-      ctx.fillText(`${goal.toLocaleString()} steps`, 80 + boxW + gap + 30, gridY + boxH + 24 + 92);
+        ctx.fillStyle = metric.bg;
+        ctx.strokeStyle = metric.border;
+        ctx.beginPath();
+        ctx.roundRect(boxX, boxY, boxW, boxH, 20);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = metric.labelColor;
+        ctx.font = 'bold 16px "Plus Jakarta Sans", system-ui, sans-serif';
+        ctx.fillText(metric.label, boxX + 30, boxY + 42);
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = '800 36px "Outfit", system-ui, sans-serif';
+        ctx.fillText(metric.value, boxX + 30, boxY + 92);
+      });
 
       // Quote Banner at Bottom
       const quoteY = 765;
@@ -318,62 +319,49 @@ export function ShareModal({ steps = 0, goal = 10000, streakDays = 1, caloriesDa
       ctx.font = '800 58px "Outfit", system-ui, sans-serif';
       ctx.fillText(steps.toLocaleString(), hudX + 24, hudY + 140);
 
-      // Metrics Row (Distance, Calories, Time)
+      // Metrics Row - only the stats the user selected, spaced evenly across the
+      // available width rather than fixed slots.
       const activeKcal = caloriesData ? caloriesData.activeKcal || caloriesData.totalKcal : 0;
       const distKm = caloriesData ? caloriesData.distanceKm : 0;
       const durationMins = caloriesData ? caloriesData.durationMins : 0;
 
-      // Metric 1: Distance
-      ctx.fillStyle = 'rgba(0, 242, 254, 0.15)';
-      ctx.strokeStyle = 'rgba(0, 242, 254, 0.3)';
-      ctx.beginPath();
-      ctx.roundRect(hudX + 24, hudY + 165, 125, 70, 14);
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = '#38BDF8';
-      ctx.font = 'bold 11px "Plus Jakarta Sans", system-ui, sans-serif';
-      ctx.fillText('📍 DISTANCE', hudX + 34, hudY + 188);
-      ctx.fillStyle = '#FFFFFF';
-      ctx.font = '800 20px "Outfit", system-ui, sans-serif';
-      ctx.fillText(`${distKm} km`, hudX + 34, hudY + 218);
+      const hudMetrics = [
+        { enabled: selectedStats.distance, bg: 'rgba(0, 242, 254, 0.15)', border: 'rgba(0, 242, 254, 0.3)', labelColor: '#38BDF8', label: '📍 DISTANCE', value: `${distKm} km` },
+        { enabled: selectedStats.calories, bg: 'rgba(255, 107, 0, 0.15)', border: 'rgba(255, 107, 0, 0.3)', labelColor: '#FF9E44', label: '🔥 CALORIES', value: `${activeKcal} kcal` },
+        { enabled: selectedStats.movingTime, bg: 'rgba(139, 92, 246, 0.15)', border: 'rgba(139, 92, 246, 0.3)', labelColor: '#A78BFA', label: '⏱️ TIME', value: `${durationMins} mins` }
+      ].filter(m => m.enabled);
 
-      // Metric 2: Active Calories
-      ctx.fillStyle = 'rgba(255, 107, 0, 0.15)';
-      ctx.strokeStyle = 'rgba(255, 107, 0, 0.3)';
-      ctx.beginPath();
-      ctx.roundRect(hudX + 165, hudY + 165, 130, 70, 14);
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = '#FF9E44';
-      ctx.font = 'bold 11px "Plus Jakarta Sans", system-ui, sans-serif';
-      ctx.fillText('🔥 CALORIES', hudX + 175, hudY + 188);
-      ctx.fillStyle = '#FFFFFF';
-      ctx.font = '800 20px "Outfit", system-ui, sans-serif';
-      ctx.fillText(`${activeKcal} kcal`, hudX + 175, hudY + 218);
+      if (hudMetrics.length > 0) {
+        const rowW = hudW - 48;
+        const slotGap = 16;
+        const slotW = (rowW - slotGap * (hudMetrics.length - 1)) / hudMetrics.length;
 
-      // Metric 3: Moving Time
-      ctx.fillStyle = 'rgba(139, 92, 246, 0.15)';
-      ctx.strokeStyle = 'rgba(139, 92, 246, 0.3)';
-      ctx.beginPath();
-      ctx.roundRect(hudX + 310, hudY + 165, 125, 70, 14);
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = '#A78BFA';
-      ctx.font = 'bold 11px "Plus Jakarta Sans", system-ui, sans-serif';
-      ctx.fillText('⏱️ TIME', hudX + 320, hudY + 188);
-      ctx.fillStyle = '#FFFFFF';
-      ctx.font = '800 20px "Outfit", system-ui, sans-serif';
-      ctx.fillText(`${durationMins} mins`, hudX + 320, hudY + 218);
+        hudMetrics.forEach((metric, idx) => {
+          const slotX = hudX + 24 + idx * (slotW + slotGap);
+          ctx.fillStyle = metric.bg;
+          ctx.strokeStyle = metric.border;
+          ctx.beginPath();
+          ctx.roundRect(slotX, hudY + 165, slotW, 70, 14);
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = metric.labelColor;
+          ctx.font = 'bold 11px "Plus Jakarta Sans", system-ui, sans-serif';
+          ctx.fillText(metric.label, slotX + 10, hudY + 188);
+          ctx.fillStyle = '#FFFFFF';
+          ctx.font = '800 20px "Outfit", system-ui, sans-serif';
+          ctx.fillText(metric.value, slotX + 10, hudY + 218);
+        });
+      }
 
       // Bottom Date & Goal Target Footer
       ctx.fillStyle = '#94A3B8';
       ctx.font = '500 13px "Plus Jakarta Sans", system-ui, sans-serif';
-      const footerText = showElevation
+      const footerText = selectedStats.elevation && showElevation
         ? `Target: ${goal.toLocaleString()} steps • ⛰️ ${metersToFloors(elevationM)} floors • ${new Date().toLocaleDateString()}`
         : `Target: ${goal.toLocaleString()} steps • ${new Date().toLocaleDateString()}`;
       ctx.fillText(footerText, hudX + 24, hudY + 280);
 
-      if (streakDays >= 1) {
+      if (selectedStats.streak && streakDays >= 1) {
         ctx.fillStyle = '#FF9E44';
         ctx.font = 'bold 13px "Outfit", system-ui, sans-serif';
         ctx.fillText(`🔥 ${streakDays} Day Streak`, hudX + 24, hudY + 308);
@@ -385,7 +373,7 @@ export function ShareModal({ steps = 0, goal = 10000, streakDays = 1, caloriesDa
     } else {
       renderCanvas();
     }
-  }, [steps, goal, streakDays, caloriesData, quote, cardMode, customPhotoDataUrl, overlayPosition, elevationM, showElevation]);
+  }, [steps, goal, streakDays, caloriesData, quote, cardMode, customPhotoDataUrl, overlayPosition, elevationM, showElevation, selectedStats]);
 
   // Universal Native Mobile App Sharing (Android WhatsApp Status / Instagram Story)
   const handleUniversalNativeShare = async (platform) => {
@@ -395,95 +383,139 @@ export function ShareModal({ steps = 0, goal = 10000, streakDays = 1, caloriesDa
       return;
     }
 
-    const activeKcal = caloriesData ? caloriesData.activeKcal || caloriesData.totalKcal : 0;
-    const distKm = caloriesData ? caloriesData.distanceKm : 0;
-    const isGoalHit = steps >= goal && steps > 0;
-    const statusStr = isGoalHit ? '🎯 GOAL ACHIEVED!' : '⚡ IN PROGRESS';
-    const elevationLine = showElevation ? `\n• Elevation Gain: ${Math.round(elevationM)} m (${metersToFloors(elevationM)} floors) ⛰️` : '';
+    // Immediate visual feedback on tap - the encode + native bridge handoff below
+    // takes a moment, and with no feedback at all it read as the button doing nothing.
+    setSharingPlatform(platform);
 
-    const caption = `🏃 *PacePulse AI Fitness Update* 🏃\n\n"${quote}"\n\n📊 *Daily Stats (${statusStr}):*\n• Steps: ${steps.toLocaleString()}\n• Active Calories: ${activeKcal} kcal\n• Distance: ${distKm} km${elevationLine}\n• Active Streak: ${streakDays} days 🔥\n\nTracked with PacePulse AI! ⚡`;
+    try {
+      const activeKcal = caloriesData ? caloriesData.activeKcal || caloriesData.totalKcal : 0;
+      const distKm = caloriesData ? caloriesData.distanceKm : 0;
+      const durationMins = caloriesData ? caloriesData.durationMins : 0;
+      const isGoalHit = steps >= goal && steps > 0;
+      const statusStr = isGoalHit ? '🎯 GOAL ACHIEVED!' : '⚡ IN PROGRESS';
 
-    // 1. Convert Canvas to JPEG format for universal mobile photo gallery compatibility.
-    // Quality 0.85 (not 0.95) keeps the share card visually sharp while roughly halving
-    // the base64 payload handed across the JS<->native bridge, which is what was making
-    // WhatsApp/Instagram feel slow to open (the intent can't fire until that transfer finishes).
-    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.85));
-    if (!blob) {
-      alert('Could not generate story card image. Please try again.');
-      return;
-    }
+      const statLines = [
+        selectedStats.steps !== false ? `• Steps: ${steps.toLocaleString()}` : null,
+        selectedStats.calories ? `• Active Calories: ${activeKcal} kcal` : null,
+        selectedStats.distance ? `• Distance: ${distKm} km` : null,
+        selectedStats.movingTime ? `• Moving Time: ${durationMins} mins` : null,
+        selectedStats.elevation && showElevation ? `• Elevation Gain: ${Math.round(elevationM)} m (${metersToFloors(elevationM)} floors) ⛰️` : null,
+        selectedStats.streak && streakDays >= 1 ? `• Active Streak: ${streakDays} days 🔥` : null
+      ].filter(Boolean).join('\n');
 
-    // 2. Inside the native Android wrapper: hand the image straight to WhatsApp Status /
-    // Instagram Stories via real Android share intents (fixes the "page not found" error
-    // caused by trying to navigate the WebView to whatsapp://.../instagram:// URLs).
-    const bridge = window.AndroidStepBridge;
-    if (bridge && (bridge.shareToWhatsAppStatus || bridge.shareToInstagramStory)) {
+      const caption = `🏃 *PacePulse AI Fitness Update* 🏃\n\n"${quote}"\n\n📊 *Daily Stats (${statusStr}):*\n${statLines}\n\nTracked with PacePulse AI! ⚡`;
+
+      // 1. Convert Canvas to JPEG format for universal mobile photo gallery compatibility.
+      // Quality 0.85 (not 0.95) keeps the share card visually sharp while roughly halving
+      // the base64 payload handed across the JS<->native bridge, which is what was making
+      // WhatsApp/Instagram feel slow to open (the intent can't fire until that transfer finishes).
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.85));
+      if (!blob) {
+        alert('Could not generate story card image. Please try again.');
+        return;
+      }
+
+      // 2. Inside the native Android wrapper: hand the image straight to WhatsApp Status /
+      // Instagram Stories via real Android share intents (fixes the "page not found" error
+      // caused by trying to navigate the WebView to whatsapp://.../instagram:// URLs).
+      const bridge = window.AndroidStepBridge;
+      if (bridge && (bridge.shareToWhatsAppStatus || bridge.shareToInstagramStory)) {
+        try {
+          await navigator.clipboard.writeText(caption);
+        } catch (err) {}
+
+        const base64Jpeg = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+
+        if (platform === 'whatsapp' && bridge.shareToWhatsAppStatus) {
+          bridge.shareToWhatsAppStatus(base64Jpeg, caption);
+          return;
+        } else if (platform === 'instagram' && bridge.shareToInstagramStory) {
+          bridge.shareToInstagramStory(base64Jpeg);
+          return;
+        }
+      }
+
+      // 3. Plain browser / installed PWA (not the wrapped Android app): download the card
+      // and copy the caption so the user can attach it manually - Web Share API first if available.
+      const file = new File([blob], `PacePulse_Progress_${steps}_Steps.jpg`, { type: 'image/jpeg' });
+      const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+      try {
+        const link = document.createElement('a');
+        link.download = `PacePulse_Progress_${steps}_Steps.jpg`;
+        link.href = URL.createObjectURL(blob);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      } catch (err) {
+        console.log("Card download fallback:", err);
+      }
+
       try {
         await navigator.clipboard.writeText(caption);
       } catch (err) {}
 
-      const base64Jpeg = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
-      });
-
-      if (platform === 'whatsapp' && bridge.shareToWhatsAppStatus) {
-        bridge.shareToWhatsAppStatus(base64Jpeg, caption);
-        return;
-      } else if (platform === 'instagram' && bridge.shareToInstagramStory) {
-        bridge.shareToInstagramStory(base64Jpeg);
-        return;
-      }
-    }
-
-    // 3. Plain browser / installed PWA (not the wrapped Android app): download the card
-    // and copy the caption so the user can attach it manually - Web Share API first if available.
-    const file = new File([blob], `PacePulse_Progress_${steps}_Steps.jpg`, { type: 'image/jpeg' });
-    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-
-    try {
-      const link = document.createElement('a');
-      link.download = `PacePulse_Progress_${steps}_Steps.jpg`;
-      link.href = URL.createObjectURL(blob);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    } catch (err) {
-      console.log("Card download fallback:", err);
-    }
-
-    try {
-      await navigator.clipboard.writeText(caption);
-    } catch (err) {}
-
-    if (isMobile && navigator.share) {
-      try {
-        if (navigator.canShare && navigator.canShare({ files: [file] })) {
-          await navigator.share({
-            title: 'PacePulse AI Progress',
-            text: caption,
-            files: [file]
-          });
-          return;
+      if (isMobile && navigator.share) {
+        try {
+          if (navigator.canShare && navigator.canShare({ files: [file] })) {
+            await navigator.share({
+              title: 'PacePulse AI Progress',
+              text: caption,
+              files: [file]
+            });
+            return;
+          }
+        } catch (e) {
+          if (e.name === 'AbortError') return; // User closed share sheet intentionally
         }
-      } catch (e) {
-        if (e.name === 'AbortError') return; // User closed share sheet intentionally
       }
-    }
 
-    alert('📲 Card image downloaded & caption copied! Open WhatsApp or Instagram and attach it from your gallery.');
+      alert('📲 Card image downloaded & caption copied! Open WhatsApp or Instagram and attach it from your gallery.');
+    } finally {
+      setSharingPlatform(null);
+    }
   };
 
   // Download PNG Card
-  const handleDownloadCard = () => {
+  // Inside the Android WebView, a plain `<a download>` click silently does nothing -
+  // WebView has no built-in download handler for data: URIs unless the app explicitly
+  // wires one up. Route through the native bridge instead, which saves the image
+  // straight into the device's Photos gallery via MediaStore (the proper Android API
+  // for this) rather than depending on a browser-only download mechanism.
+  const handleDownloadCard = async () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const link = document.createElement('a');
-    link.download = `PacePulse_Goal_${steps}_Steps.png`;
-    link.href = canvas.toDataURL('image/png');
-    link.click();
+
+    setSharingPlatform('download');
+    try {
+      const bridge = window.AndroidStepBridge;
+      if (bridge && bridge.saveImageToGallery) {
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+        if (!blob) return;
+        const base64Png = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+        bridge.saveImageToGallery(base64Png, `PacePulse_Goal_${steps}_Steps.png`);
+        return;
+      }
+
+      // Plain browser / installed PWA (not the wrapped Android app) - a normal
+      // download link works fine here.
+      const link = document.createElement('a');
+      link.download = `PacePulse_Goal_${steps}_Steps.png`;
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+    } finally {
+      setSharingPlatform(null);
+    }
   };
 
   const handleCopyCaption = () => {
@@ -653,6 +685,47 @@ export function ShareModal({ steps = 0, goal = 10000, streakDays = 1, caloriesDa
           </div>
         )}
 
+        {/* Stat Selection - choose what appears on the card */}
+        <div style={{
+          background: 'rgba(139, 92, 246, 0.08)',
+          border: '1px solid rgba(139, 92, 246, 0.25)',
+          borderRadius: '16px',
+          padding: '12px',
+          marginBottom: '16px'
+        }}>
+          <span style={{ fontSize: '12px', fontWeight: '700', color: '#A78BFA', display: 'block', marginBottom: '8px' }}>
+            Choose What to Show on the Card:
+          </span>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+            {[
+              { key: 'steps', label: 'Steps' },
+              { key: 'calories', label: 'Calories' },
+              { key: 'distance', label: 'Distance' },
+              { key: 'movingTime', label: 'Moving Time' },
+              ...(elevationSupported ? [{ key: 'elevation', label: 'Elevation' }] : []),
+              { key: 'streak', label: 'Streak' }
+            ].map(stat => (
+              <button
+                key={stat.key}
+                type="button"
+                onClick={() => toggleStat(stat.key)}
+                style={{
+                  padding: '6px 12px',
+                  fontSize: '11px',
+                  fontWeight: '700',
+                  borderRadius: '20px',
+                  border: selectedStats[stat.key] ? '1.5px solid #A78BFA' : '1px solid rgba(255, 255, 255, 0.15)',
+                  background: selectedStats[stat.key] ? 'rgba(139, 92, 246, 0.3)' : 'rgba(255, 255, 255, 0.05)',
+                  color: selectedStats[stat.key] ? '#E9D5FF' : 'var(--text-muted)',
+                  cursor: 'pointer'
+                }}
+              >
+                {selectedStats[stat.key] ? '✓ ' : ''}{stat.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* Live Canvas Graphic Preview */}
         <div style={{
           width: '100%',
@@ -676,6 +749,7 @@ export function ShareModal({ steps = 0, goal = 10000, streakDays = 1, caloriesDa
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '14px' }}>
           <button
             onClick={() => handleUniversalNativeShare('whatsapp')}
+            disabled={sharingPlatform !== null}
             style={{
               background: 'linear-gradient(135deg, #25D366 0%, #128C7E 100%)',
               color: '#FFFFFF',
@@ -684,18 +758,27 @@ export function ShareModal({ steps = 0, goal = 10000, streakDays = 1, caloriesDa
               padding: '14px',
               fontSize: '14px',
               fontWeight: '700',
-              cursor: 'pointer',
+              cursor: sharingPlatform !== null ? 'default' : 'pointer',
+              opacity: sharingPlatform !== null && sharingPlatform !== 'whatsapp' ? 0.5 : 1,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               gap: '8px'
             }}
           >
-            <MessageCircle size={18} /> Share to WhatsApp Story
+            {sharingPlatform === 'whatsapp' ? (
+              <>
+                <span className="spin-loader" style={{ width: 16, height: 16, border: '2px solid rgba(255,255,255,0.4)', borderTopColor: '#FFFFFF', borderRadius: '50%', animation: 'pp-spin 0.7s linear infinite' }} />
+                Opening WhatsApp...
+              </>
+            ) : (
+              <><MessageCircle size={18} /> Share to WhatsApp Story</>
+            )}
           </button>
 
           <button
             onClick={() => handleUniversalNativeShare('instagram')}
+            disabled={sharingPlatform !== null}
             style={{
               background: 'linear-gradient(135deg, #E1306C 0%, #C13584 50%, #833AB4 100%)',
               color: '#FFFFFF',
@@ -704,25 +787,35 @@ export function ShareModal({ steps = 0, goal = 10000, streakDays = 1, caloriesDa
               padding: '14px',
               fontSize: '14px',
               fontWeight: '700',
-              cursor: 'pointer',
+              cursor: sharingPlatform !== null ? 'default' : 'pointer',
+              opacity: sharingPlatform !== null && sharingPlatform !== 'instagram' ? 0.5 : 1,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               gap: '8px'
             }}
           >
-            <Instagram size={18} /> Share to Instagram Story
+            {sharingPlatform === 'instagram' ? (
+              <>
+                <span className="spin-loader" style={{ width: 16, height: 16, border: '2px solid rgba(255,255,255,0.4)', borderTopColor: '#FFFFFF', borderRadius: '50%', animation: 'pp-spin 0.7s linear infinite' }} />
+                Opening Instagram...
+              </>
+            ) : (
+              <><Instagram size={18} /> Share to Instagram Story</>
+            )}
           </button>
+          <style>{'@keyframes pp-spin { to { transform: rotate(360deg); } }'}</style>
         </div>
 
         {/* Secondary Action Buttons (Download & Copy Caption) */}
         <div style={{ display: 'flex', gap: '10px' }}>
           <button
             onClick={handleDownloadCard}
+            disabled={sharingPlatform !== null}
             className="btn-secondary"
-            style={{ flex: 1, padding: '10px', fontSize: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+            style={{ flex: 1, padding: '10px', fontSize: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', opacity: sharingPlatform !== null && sharingPlatform !== 'download' ? 0.5 : 1 }}
           >
-            <Download size={14} /> Download Story Card
+            {sharingPlatform === 'download' ? 'Saving...' : <><Download size={14} /> Download Story Card</>}
           </button>
           <button
             onClick={handleCopyCaption}
