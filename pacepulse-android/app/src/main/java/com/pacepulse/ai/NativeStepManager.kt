@@ -25,13 +25,15 @@ import java.util.Locale
  * False-step defenses in effect (see processCumulativeStep for the actual logic):
  *  1. Vehicle rejection - hardware ticks while Activity Recognition confirms IN_VEHICLE
  *     (auto/car/bus vibration) are excluded.
- *  2. Still rejection - hardware ticks while confirmed STILL (sitting/standing and
- *     fidgeting, phone handling in a pocket) are excluded. Trade-off: because Activity
- *     Recognition takes a few seconds to confirm a new state, the very first steps of a
- *     fresh walk can occasionally be missed rather than a fidget being over-counted -
- *     deliberate, since the user-reported problem is over-counting, not under-counting.
- *  3. Cycling rejection - hardware ticks while confirmed ON_BICYCLE are excluded
+ *  2. Cycling rejection - hardware ticks while confirmed ON_BICYCLE are excluded
  *     (pedaling can trigger the step sensor on some devices).
+ *  3. STILL is deliberately NOT excluded (removed after real-world testing): Activity
+ *     Recognition takes several seconds to confirm a state change, and can also report
+ *     STILL for stretches of a real walk (checking the phone, brief pauses, a steady
+ *     hand-carry). Excluding it was silently discarding genuine steps taken during that
+ *     lag, which is worse for a step tracker than the rare fidget/pocket-handling tick it
+ *     was meant to catch - the cadence cap below already guards against the sensor-burst
+ *     case that actually caused the original over-counting complaint.
  *  4. Cadence sanity cap - every single sensor tick's delta is capped against how many
  *     real steps a human could plausibly take in the elapsed time since the last tick
  *     (generous ceiling, well above sprinting pace). This is what stops a single
@@ -64,7 +66,6 @@ object NativeStepManager {
     private const val MAX_STEPS_PER_SECOND = 5f
     private val EXCLUDED_MOTION_STATES = setOf(
         DetectedActivity.IN_VEHICLE,
-        DetectedActivity.STILL,
         DetectedActivity.ON_BICYCLE
     )
     private const val MOTION_TRANSITION_REQUEST_CODE = 4001

@@ -510,6 +510,19 @@ export default function App() {
   const userRef = React.useRef(user);
   useEffect(() => { userRef.current = user; }, [user]);
 
+  // Keep the native step tracker's active-user identity in sync on every app
+  // process start, not just a fresh login. handleAuthSuccess (which also calls
+  // this) only runs when Firebase's session uid differs from what's already
+  // cached - on a normal cold start with an already-valid cached session, that
+  // branch is skipped entirely, leaving the native side's in-memory activeUid on
+  // its default ("guest") for the whole session even though a real account is
+  // logged in. This effect covers that gap unconditionally.
+  useEffect(() => {
+    if (window.AndroidStepBridge && window.AndroidStepBridge.setActiveUser) {
+      window.AndroidStepBridge.setActiveUser(user ? user.uid : 'guest');
+    }
+  }, [user]);
+
   // Authoritative session check: real Firebase Auth session state wins over any
   // cached localStorage session. This is what catches a session cached under the
   // old (pre-migration) uid scheme - since it isn't backed by a real Firebase Auth
