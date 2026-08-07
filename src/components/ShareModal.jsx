@@ -15,7 +15,11 @@ export function ShareModal({ steps: liveSteps = 0, goal: liveGoal = 10000, strea
   const [caloriesData] = useState(liveCaloriesData);
   const [elevationM] = useState(liveElevationM);
 
-  const showElevation = elevationSupported && elevationM > 0;
+  // Fixed 5-stat card: Elevation shows whenever the device supports tracking
+  // it, same as Steps/Goal/Distance/Moving Time show their zero-value rather
+  // than disappearing - it was previously hidden any day with 0m gained,
+  // which was the one stat inconsistent with "always show these 5".
+  const showElevation = elevationSupported;
   const canvasRef = useRef(null);
   const fileInputRef = useRef(null);
   const [copied, setCopied] = useState(false);
