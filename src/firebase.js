@@ -38,6 +38,18 @@ const FIRESTORE_PROJECT_ID = 'pacepulse-ai';
 const FIRESTORE_REST_BASE = `https://firestore.googleapis.com/v1/projects/${FIRESTORE_PROJECT_ID}/databases/(default)/documents`;
 
 /**
+ * Rolling in-memory log of every Firestore call this session, for the on-device
+ * debug panel - lets a build be diagnosed without a USB/adb connection by showing
+ * exactly what each call sent and got back (auth state, status code, or the raw
+ * exception if the network call itself failed).
+ */
+export const debugLog = [];
+function pushDebug(entry) {
+  debugLog.unshift({ time: new Date().toLocaleTimeString(), ...entry });
+  if (debugLog.length > 25) debugLog.length = 25;
+}
+
+/**
  * All Firestore REST calls must go through this wrapper now that security rules
  * require a real signed-in identity (`request.auth != null`) for every read/write -
  * it attaches the current Firebase ID token as a Bearer header. Plain anonymous
@@ -45,13 +57,39 @@ const FIRESTORE_REST_BASE = `https://firestore.googleapis.com/v1/projects/${FIRE
  */
 async function firestoreFetch(url, options = {}) {
   const headers = { ...(options.headers || {}) };
+  const shortPath = url.replace(FIRESTORE_REST_BASE, '').split('?')[0] || '/';
+  const method = options.method || 'GET';
+  let authAttached = false;
+  let tokenError = null;
+
   try {
     if (auth.currentUser) {
       const token = await auth.currentUser.getIdToken();
       headers.Authorization = `Bearer ${token}`;
+      authAttached = true;
     }
-  } catch (e) {}
-  return fetch(url, { ...options, headers });
+  } catch (e) {
+    tokenError = e && e.message ? e.message : String(e);
+  }
+
+  try {
+    const res = await fetch(url, { ...options, headers });
+    pushDebug({
+      path: shortPath, method,
+      authUser: auth.currentUser ? auth.currentUser.uid : null,
+      authAttached, tokenError,
+      status: res.status, ok: res.ok
+    });
+    return res;
+  } catch (e) {
+    pushDebug({
+      path: shortPath, method,
+      authUser: auth.currentUser ? auth.currentUser.uid : null,
+      authAttached, tokenError,
+      status: null, ok: false, fetchError: e && e.message ? e.message : String(e)
+    });
+    throw e;
+  }
 }
 
 export async function signOut() {

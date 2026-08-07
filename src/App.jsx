@@ -15,6 +15,7 @@ import { DeleteAccountModal } from './components/DeleteAccountModal';
 import { HistoryModal } from './components/HistoryModal';
 import { SocialLeaderboardModal } from './components/SocialLeaderboardModal';
 import { NotificationModal } from './components/NotificationModal';
+import { DebugPanel } from './components/DebugPanel';
 import { speakMilestoneAnnouncement, speakGoalReachedAnnouncement, setAudioCoachMuted } from './utils/audioCoach';
 import { 
   auth,
@@ -122,6 +123,12 @@ export default function App() {
   // hour = today's total minus everything else recorded so far" against a still-empty
   // array, dumping the whole day's steps into the current hour bucket.
   const hourlyDataReadyRef = React.useRef(!user || user.uid === 'guest');
+
+  // Diagnostic-only: records every call the native side makes into
+  // window.syncNativeTodaySteps, even ones dropped by the ready-gate below, so
+  // the on-device Debug Panel can show whether the native sensor pipeline is
+  // reaching JS at all versus being silently gated.
+  const nativeCallInfoRef = React.useRef({ count: 0, lastValue: null, lastTime: null });
 
   // Calculate sum of steps from 24 hourly buckets
   const totalDailySteps = hourlyData.reduce((sum, h) => sum + (h.steps || 0), 0);
@@ -357,6 +364,11 @@ export default function App() {
   // Expose Hardware Step JS Bridge listener (`window.syncNativeTodaySteps`)
   useEffect(() => {
     window.syncNativeTodaySteps = (totalSteps) => {
+      nativeCallInfoRef.current = {
+        count: nativeCallInfoRef.current.count + 1,
+        lastValue: totalSteps,
+        lastTime: new Date().toLocaleTimeString()
+      };
       if (typeof totalSteps !== 'number' || isNaN(totalSteps)) return;
       // Skip while the authoritative hourly breakdown is still loading from Firestore
       // after a login - otherwise this can race ahead of that fetch and reconstruct
@@ -766,6 +778,14 @@ export default function App() {
           onClose={() => setShowAuthModal(false)}
         />
       )}
+
+      <DebugPanel
+        hourlyDataReadyRef={hourlyDataReadyRef}
+        nativeCallInfoRef={nativeCallInfoRef}
+        totalDailySteps={totalDailySteps}
+        cloudSyncStatus={cloudSyncStatus}
+        userUid={user ? user.uid : null}
+      />
     </div>
   );
 }
