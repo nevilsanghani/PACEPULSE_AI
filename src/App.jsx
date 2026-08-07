@@ -133,6 +133,22 @@ export default function App() {
   // reaching JS at all versus being silently gated.
   const nativeCallInfoRef = React.useRef({ count: 0, lastValue: null, lastTime: null });
 
+  // Tracks the last raw "totalSteps" value native reported this session, so the
+  // sync handler below can add only the *new* steps since last time rather than
+  // trusting native's number as the complete day's total - native's own count
+  // restarts from 0 after any full uninstall (its local baseline lives in
+  // SharedPreferences, which Android wipes), and treating that fresh, smaller
+  // number as authoritative was overwriting a correctly cloud-restored total the
+  // moment any new native reading arrived after a reinstall.
+  const lastNativeTotalRef = React.useRef(null);
+
+  // Also reset the native reconciliation point on any day rollover regardless of
+  // login state (the two resets above only cover the logged-in-user effects) -
+  // a new day means yesterday's native total is meaningless as a delta baseline.
+  useEffect(() => {
+    lastNativeTotalRef.current = null;
+  }, [todayStr]);
+
   // Calculate sum of steps from 24 hourly buckets
   const totalDailySteps = hourlyData.reduce((sum, h) => sum + (h.steps || 0), 0);
 
@@ -180,6 +196,7 @@ export default function App() {
   useEffect(() => {
     if (!user || user.uid === 'guest') return;
     hourlyDataReadyRef.current = false;
+    lastNativeTotalRef.current = null;
     refreshPendingRequests();
 
     // Fetch remote logs from Cloud Firestore for weekly chart & history
@@ -371,14 +388,26 @@ export default function App() {
       // today's whole step total into the current hour against a stale/empty array.
       if (!hourlyDataReadyRef.current) return;
 
+      const previousNativeTotal = lastNativeTotalRef.current;
+      lastNativeTotalRef.current = totalSteps;
+
+      // First reading this session, or native's own count is lower than what we
+      // last saw (its local baseline was reset - e.g. a full uninstall wipes the
+      // SharedPreferences it lives in) - just establish the new reference point
+      // without touching hourlyData, so a correctly cloud-restored total isn't
+      // discarded the moment a fresh-baseline native reading arrives. The next
+      // call will add real new steps on top of it via the delta below.
+      if (previousNativeTotal === null || totalSteps < previousNativeTotal) return;
+
+      const delta = totalSteps - previousNativeTotal;
+      if (delta <= 0) return;
+
       setHourlyData(prev => {
         const next = [...prev];
         const hour = new Date().getHours();
-        const otherHoursSum = prev.reduce((acc, item, idx) => idx === hour ? acc : acc + item.steps, 0);
-        const currentHourSteps = Math.max(totalSteps - otherHoursSum, 0);
         next[hour] = {
           ...next[hour],
-          steps: currentHourSteps
+          steps: (next[hour].steps || 0) + delta
         };
         return next;
       });
@@ -455,6 +484,7 @@ export default function App() {
     // poll tick racing ahead of that fetch would reconstruct today's whole step total
     // into the current hour against this possibly-stale/empty array.
     hourlyDataReadyRef.current = false;
+    lastNativeTotalRef.current = null;
     const hourlyKey = getUserKey('pacepulse_hourly', authenticatedUser);
     const savedHourly = localStorage.getItem(hourlyKey);
     if (savedHourly) {
